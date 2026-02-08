@@ -1,0 +1,6 @@
+[submodule "GritGuard"]
+	path = GritGuard
+	url = https://github.com/vl3c/GritGuard.git
+[submodule "SelfAssembler"]
+	path = SelfAssembler
+	url = https://github.com/vl3c/SelfAssembler.git

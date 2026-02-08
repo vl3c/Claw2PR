@@ -1,0 +1,37 @@
+{
+  "id": "coding-tool",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "ghToken": {
+        "type": "string",
+        "description": "GitHub Personal Access Token for cloning repos and creating PRs"
+      },
+      "gitUserName": {
+        "type": "string",
+        "description": "Git author/committer name"
+      },
+      "gitUserEmail": {
+        "type": "string",
+        "description": "Git author/committer email"
+      },
+      "defaultBudget": {
+        "type": "number",
+        "description": "Default budget in USD per task (default: 15)"
+      },
+      "maxConcurrentTasks": {
+        "type": "number",
+        "description": "Maximum number of concurrent coding tasks (default: 2)"
+      },
+      "selfassemblerVenv": {
+        "type": "string",
+        "description": "Path to SelfAssembler Python venv"
+      },
+      "envFile": {
+        "type": "string",
+        "description": "Path to .env file with API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) passed to task processes"
+      }
+    },
+    "required": ["ghToken", "gitUserName", "gitUserEmail"]
+  }
+}
