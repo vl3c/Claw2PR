@@ -1,0 +1,199 @@
+#!/bin/bash
+# run-task.sh — Clone repo, configure git, run SelfAssembler through GritGuard
+#
+# Environment variables (set by process-manager.ts):
+#   TASK_ID, REPO_URL, TASK_DESCRIPTION, TASK_NAME, BASE_BRANCH, BUDGET
+#   TASK_DIR, LOG_FILE, GRITGUARD_PATH, SA_VENV, SA_TEMPLATE
+#   GH_TOKEN, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL
+#   HOOK_TOKEN, PLUGIN_DIR, ANTHROPIC_API_KEY
+
+set -euo pipefail
+
+# Ensure task directory exists
+mkdir -p "$TASK_DIR"
+
+# Redirect all output to log file
+exec > "$LOG_FILE" 2>&1
+
+echo "=== Coding Task: $TASK_ID ==="
+echo "Repo:   $REPO_URL"
+echo "Task:   $TASK_DESCRIPTION"
+echo "Name:   $TASK_NAME"
+echo "Branch: $BASE_BRANCH"
+echo "Budget: \$$BUDGET"
+echo "Started: $(date -Iseconds)"
+echo ""
+
+REPO_DIR="$TASK_DIR/repo"
+STATUS_FILE="$TASK_DIR/status.json"
+
+# Write initial status
+write_status() {
+    local status="$1"
+    local message="${2:-}"
+    local pr_url="${3:-}"
+    cat > "$STATUS_FILE" <<STATUSEOF
+{
+  "status": "$status",
+  "message": "$message",
+  "prUrl": "$pr_url",
+  "finishedAt": "$(date -Iseconds)"
+}
+STATUSEOF
+}
+
+# Notify agent on completion
+notify() {
+    local message="$1"
+    if [[ -n "${HOOK_TOKEN:-}" ]]; then
+        curl -s -X POST "http://127.0.0.1:18789/hooks/agent" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $HOOK_TOKEN" \
+            -d "{
+                \"message\": \"$message\",
+                \"name\": \"CodingTool\",
+                \"wakeMode\": \"now\",
+                \"deliver\": true,
+                \"channel\": \"telegram\",
+                \"sessionKey\": \"main\"
+            }" || echo "[notify] Failed to send hook notification"
+    fi
+}
+
+# Cleanup on failure
+on_error() {
+    local exit_code=$?
+    echo ""
+    echo "=== TASK FAILED (exit code: $exit_code) ==="
+    echo "Failed at: $(date -Iseconds)"
+    write_status "failed" "Task failed with exit code $exit_code"
+    notify "Coding task '$TASK_NAME' FAILED (task $TASK_ID). Check logs for details."
+    exit $exit_code
+}
+trap on_error ERR
+
+# ─── Step 1: Clone / copy repository ─────────────────────────
+echo "=== Step 1: Preparing repository ==="
+
+export GIT_TERMINAL_PROMPT=0
+
+if [[ "$REPO_URL" == /* ]]; then
+    # Local repo — clone from local path
+    echo "Local repo detected: $REPO_URL"
+    git clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR" 2>&1 || {
+        # If branch doesn't exist, clone default branch
+        echo "Branch '$BASE_BRANCH' not found, cloning default branch..."
+        git clone "$REPO_URL" "$REPO_DIR" 2>&1
+    }
+    echo "Cloned local repo to $REPO_DIR"
+else
+    # Remote repo — clone from GitHub with credentials
+    git_cred_helper="!f() { echo \"protocol=https\"; echo \"host=github.com\"; echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+    git -c "credential.helper=$git_cred_helper" clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR"
+    echo "Cloned remote repo to $REPO_DIR"
+fi
+
+# Configure git identity in the cloned repo
+cd "$REPO_DIR"
+git config user.name "$GIT_AUTHOR_NAME"
+git config user.email "$GIT_AUTHOR_EMAIL"
+
+# Set up credential helper for pushes (remote repos)
+if [[ "$REPO_URL" != /* ]]; then
+    git config credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+fi
+
+echo ""
+
+# ─── Step 2: Copy SelfAssembler config ─────────────────────
+echo "=== Step 2: Configuring SelfAssembler ==="
+
+cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
+
+# Override base_branch in the config
+sed -i "s/base_branch: \"main\"/base_branch: \"$BASE_BRANCH\"/" "$REPO_DIR/selfassembler.yaml"
+
+# For local repos, disable PR creation phases (no GitHub remote to push to)
+if [[ "$REPO_URL" == /* ]]; then
+    sed -i '/^  pr_creation:/,/^  [a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
+    sed -i '/^  pr_self_review:/,/^[a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
+    echo "Disabled pr_creation and pr_self_review for local repo"
+fi
+
+# Ensure SelfAssembler artifacts are gitignored so preflight passes
+if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
+    printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n' >> "$REPO_DIR/.gitignore"
+    git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts" --no-verify
+    echo "Added selfassembler artifacts to .gitignore"
+fi
+
+echo "Config copied and patched (base_branch=$BASE_BRANCH)"
+echo ""
+
+# ─── Step 3: Activate SelfAssembler venv ───────────────────
+echo "=== Step 3: Activating SelfAssembler venv ==="
+
+if [[ -f "$SA_VENV/bin/activate" ]]; then
+    source "$SA_VENV/bin/activate"
+    echo "Activated venv: $SA_VENV"
+else
+    echo "ERROR: SelfAssembler venv not found at $SA_VENV"
+    exit 1
+fi
+
+# Verify selfassembler is available
+if ! command -v selfassembler &>/dev/null; then
+    echo "ERROR: selfassembler command not found after venv activation"
+    exit 1
+fi
+echo "selfassembler version: $(selfassembler --version 2>&1 || echo 'unknown')"
+echo ""
+
+# ─── Step 4: Run SelfAssembler through GritGuard ──────────
+echo "=== Step 4: Running SelfAssembler through GritGuard ==="
+echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
+echo ""
+
+"$GRITGUARD_PATH" \
+    selfassembler "$TASK_DESCRIPTION" \
+    --name "$TASK_NAME" \
+    --repo "$REPO_DIR" \
+    --no-approvals \
+    --budget "$BUDGET"
+
+echo ""
+echo "=== SelfAssembler completed ==="
+
+# ─── Step 5: Extract results ─────────────────────────────
+echo "=== Step 5: Extracting results ==="
+
+PR_URL=""
+BRANCH_NAME=""
+
+if [[ "$REPO_URL" == /* ]]; then
+    # Local repo — extract branch name from worktree
+    BRANCH_NAME=$(cd "$REPO_DIR" && git branch --list 'feature/*' | head -1 | sed 's/^[* ]*//')
+    echo "Local repo — branch: $BRANCH_NAME"
+else
+    # Remote repo — extract PR URL from log
+    if PR_URL=$(grep -oP 'https://github\.com/[^\s]+/pull/\d+' "$LOG_FILE" | tail -1) && [[ -n "$PR_URL" ]]; then
+        echo "PR URL: $PR_URL"
+    else
+        echo "No PR URL found in output (task may not have created a PR)"
+    fi
+fi
+
+# ─── Step 6: Write final status and notify ─────────────────
+echo ""
+echo "=== Task completed successfully ==="
+echo "Finished at: $(date -Iseconds)"
+
+write_status "completed" "Task completed successfully" "$PR_URL"
+
+if [[ -n "$PR_URL" ]]; then
+    notify "Coding task '$TASK_NAME' completed! PR: $PR_URL (task $TASK_ID)"
+elif [[ -n "$BRANCH_NAME" ]]; then
+    notify "Coding task '$TASK_NAME' completed on local repo. Branch: $BRANCH_NAME (task $TASK_ID)"
+else
+    notify "Coding task '$TASK_NAME' completed (no PR created). Task $TASK_ID"
+fi

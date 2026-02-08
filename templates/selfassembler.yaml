@@ -1,0 +1,123 @@
+# SelfAssembler config for unattended coding tasks via OpenClaw
+# Budget and branch are overridden by run-task.sh via CLI flags
+
+budget_limit_usd: 15.0
+plans_dir: "./plans"
+
+agent:
+  type: "claude"
+  default_timeout: 600
+  max_turns_default: 50
+  dangerous_mode: true  # --dangerously-skip-permissions for unattended
+
+# Both Claude Code and Codex are available with subscription auth
+# SelfAssembler will auto-detect and enable debate mode if both installed
+debate:
+  enabled: true
+  primary_agent: "claude"
+  secondary_agent: "codex"
+
+git:
+  base_branch: "main"
+  worktree_dir: "./.worktrees"
+  branch_prefix: "feature/"
+  cleanup_on_fail: false
+  cleanup_remote_on_fail: false
+  auto_update: true
+
+commands:
+  lint: null
+  typecheck: null
+  test: null
+  build: null
+
+phases:
+  preflight:
+    timeout: 60
+    enabled: true
+  setup:
+    timeout: 120
+    enabled: true
+  research:
+    timeout: 300
+    max_turns: 25
+    estimated_cost: 0.5
+    enabled: true
+  planning:
+    timeout: 600
+    max_turns: 20
+    estimated_cost: 1.0
+    enabled: true
+  implementation:
+    timeout: 3600
+    max_turns: 100
+    estimated_cost: 3.0
+    enabled: true
+  test_writing:
+    timeout: 1200
+    max_turns: 50
+    estimated_cost: 1.5
+    enabled: true
+  test_execution:
+    timeout: 1800
+    max_turns: 60
+    max_iterations: 5
+    estimated_cost: 2.0
+    enabled: true
+  code_review:
+    timeout: 600
+    max_turns: 30
+    estimated_cost: 1.0
+    enabled: true
+  fix_review_issues:
+    timeout: 900
+    max_turns: 40
+    estimated_cost: 1.0
+    enabled: true
+  lint_check:
+    timeout: 300
+    max_turns: 20
+    estimated_cost: 0.5
+    enabled: true
+  documentation:
+    timeout: 600
+    max_turns: 30
+    estimated_cost: 0.5
+    enabled: true
+  final_verification:
+    timeout: 300
+    max_turns: 15
+    estimated_cost: 0.5
+    enabled: true
+  commit_prep:
+    timeout: 300
+    max_turns: 10
+    estimated_cost: 0.3
+    enabled: true
+  conflict_check:
+    timeout: 300
+    max_turns: 20
+    estimated_cost: 0.5
+    enabled: true
+  pr_creation:
+    timeout: 300
+    max_turns: 15
+    estimated_cost: 0.3
+    enabled: true
+  pr_self_review:
+    timeout: 600
+    max_turns: 20
+    estimated_cost: 0.5
+    enabled: true
+
+approvals:
+  enabled: false
+  timeout_hours: 24.0
+
+notifications:
+  console:
+    enabled: true
+    colors: false
+
+copy_files:
+  - ".claude/*"
