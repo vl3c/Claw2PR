@@ -19,6 +19,7 @@ type PluginConfig = {
   selfassemblerVenv?: string;
   envFile?: string;
   useSubscriptionAuth?: boolean;
+  dockerImage?: string;
 };
 
 function ok(text: string, details: Record<string, unknown> = {}) {
@@ -59,7 +60,9 @@ export function createCodingTools(
 ) {
   const maxConcurrent = config.maxConcurrentTasks ?? 2;
   const defaultBudget = config.defaultBudget ?? 15;
-  const gritguardPath = `${pluginDir}/GritGuard/bin/gritguard`;
+  const gritguardPath = config.dockerImage
+    ? `${pluginDir}/GritGuard/bin/gritguard-docker`
+    : `${pluginDir}/GritGuard/bin/gritguard`;
   const scriptPath = `${pluginDir}/scripts/run-task.sh`;
   const templatePath = `${pluginDir}/templates/selfassembler.yaml`;
   const saVenv = config.selfassemblerVenv ?? "/var/lib/openclaw/.openclaw/selfassembler-venv";
@@ -181,6 +184,7 @@ export function createCodingTools(
             pluginDir,
             envFile: config.envFile,
             useSubscriptionAuth: config.useSubscriptionAuth,
+            dockerImage: config.dockerImage,
           });
 
           return ok(
