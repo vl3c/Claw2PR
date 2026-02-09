@@ -18,6 +18,7 @@ type PluginConfig = {
   maxConcurrentTasks?: number;
   selfassemblerVenv?: string;
   envFile?: string;
+  useSubscriptionAuth?: boolean;
 };
 
 function ok(text: string, details: Record<string, unknown> = {}) {
@@ -179,6 +180,7 @@ export function createCodingTools(
             hookToken,
             pluginDir,
             envFile: config.envFile,
+            useSubscriptionAuth: config.useSubscriptionAuth,
           });
 
           return ok(
@@ -439,6 +441,11 @@ export function createCodingTools(
             const home = process.env.HOME || "/var/lib/openclaw";
             if (!existsSync(`${home}/.codex/auth.json`)) throw new Error("not found (~/.codex/auth.json)");
             return "logged in (subscription auth)";
+          }),
+          check("Auth mode", () => {
+            return config.useSubscriptionAuth
+              ? "subscription (API keys stripped)"
+              : "API keys (from env/envFile)";
           }),
           check("Git identity", () => {
             if (!config.gitUserName || !config.gitUserEmail) throw new Error("not configured");

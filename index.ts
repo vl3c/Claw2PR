@@ -10,6 +10,7 @@ type PluginConfig = {
   maxConcurrentTasks?: number;
   selfassemblerVenv?: string;
   envFile?: string;
+  useSubscriptionAuth?: boolean;
 };
 
 const plugin = {
@@ -18,7 +19,11 @@ const plugin = {
   description: "Autonomous coding tasks — clone repos, run SelfAssembler through GritGuard, produce PRs",
 
   register(api: OpenClawPluginApi) {
-    const config = (api.pluginConfig ?? {}) as PluginConfig;
+    const rawConfig = (api.pluginConfig ?? {}) as PluginConfig;
+    const config: PluginConfig = {
+      ...rawConfig,
+      ghToken: rawConfig.ghToken || process.env.GH_TOKEN || "",
+    };
 
     if (!config.ghToken) {
       console.log("[coding-tool] Warning: ghToken not configured — tasks will fail until configured");
@@ -39,7 +44,7 @@ const plugin = {
     try {
       pluginDir = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
     } catch {
-      pluginDir = typeof __dirname !== "undefined" ? __dirname : "/home/<user>/agent/coding-tool";
+      pluginDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
     }
     const workspaceDir = "/var/lib/openclaw/.openclaw/workspace/coding-tasks";
 

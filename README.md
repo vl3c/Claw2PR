@@ -78,21 +78,25 @@ In `openclaw.json` under `plugins.entries.coding-tool.config`:
 ```json
 {
   "ghToken": "ghp_...",
-  "gitUserName": "vl3c",
-  "gitUserEmail": "vlad3ciobanu@gmail.com",
+  "gitUserName": "<your-git-username>",
+  "gitUserEmail": "<your-git-email>",
   "defaultBudget": 15,
   "maxConcurrentTasks": 2,
   "selfassemblerVenv": "/var/lib/openclaw/.openclaw/selfassembler-venv",
-  "envFile": "/home/<user>/.env"
+  "envFile": "/path/to/.env",
+  "useSubscriptionAuth": true
 }
 ```
 
-- `ghToken` — GitHub PAT for cloning private repos and creating PRs
-- `gitUserName` / `gitUserEmail` — git identity for commits
-- `defaultBudget` — USD limit per task (default 15)
-- `maxConcurrentTasks` — concurrent task cap (default 2)
-- `selfassemblerVenv` — path to the Python venv with SelfAssembler installed
-- `envFile` — optional `.env` file with API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) passed to task processes
+| Key | Description |
+|-----|-------------|
+| `ghToken` | GitHub PAT for cloning private repos and creating PRs |
+| `gitUserName` / `gitUserEmail` | Git identity for commits |
+| `defaultBudget` | USD limit per task (default 15) |
+| `maxConcurrentTasks` | Concurrent task cap (default 2) |
+| `selfassemblerVenv` | Path to the Python venv with SelfAssembler installed |
+| `envFile` | Optional `.env` file with API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) passed to task processes |
+| `useSubscriptionAuth` | When `true`, strip `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from the task environment so Claude/Codex CLIs use their stored subscription credentials instead of API keys (default: `false`) |
 
 ## Setup
 
@@ -105,18 +109,62 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
    sudo -u openclaw python3 -m venv /var/lib/openclaw/.openclaw/selfassembler-venv
    sudo -u openclaw /var/lib/openclaw/.openclaw/selfassembler-venv/bin/pip install -e ./SelfAssembler
    ```
-4. **Symlink plugin to extensions**:
+4. **Install plugin** — either symlink or copy into extensions:
    ```bash
-   sudo -u openclaw ln -s /home/<user>/agent/coding-tool /var/lib/openclaw/.openclaw/extensions/coding-tool
+   # Option A: symlink (for development)
+   sudo -u openclaw ln -s /path/to/coding-tool /var/lib/openclaw/.openclaw/extensions/coding-tool
+   # Make sure openclaw can traverse the symlink:
+   chmod o+x /path/to /path/to/parent
+
+   # Option B: copy (for production)
+   sudo -u openclaw cp -r /path/to/coding-tool /var/lib/openclaw/.openclaw/extensions/coding-tool
    ```
-5. **Set directory permissions** (openclaw needs to traverse the symlink):
-   ```bash
-   chmod o+x /home/<user> /home/<user>/agent
+5. **Register plugin in `openclaw.json`**:
+   ```json
+   {
+     "plugins": {
+       "allow": ["coding-tool"],
+       "load": {
+         "paths": ["/var/lib/openclaw/.openclaw/extensions/coding-tool"]
+       },
+       "entries": {
+         "coding-tool": {
+           "enabled": true,
+           "config": {
+             "ghToken": "ghp_...",
+             "gitUserName": "<your-git-username>",
+             "gitUserEmail": "<your-git-email>",
+             "useSubscriptionAuth": true
+           }
+         }
+       }
+     }
+   }
    ```
-6. **Add plugin config** to `openclaw.json` (see Configuration above)
+   The plugin exposes its tools automatically — the agent will see `coding_run_task`, `coding_task_status`, etc. once loaded.
+6. **Enable hooks** (for task completion notifications):
+   ```json
+   {
+     "hooks": {
+       "enabled": true,
+       "token": "<generate-a-random-token>"
+     }
+   }
+   ```
+   Without hooks, the agent won't be notified when tasks finish.
 7. **Create workspace**: `sudo -u openclaw mkdir -p /var/lib/openclaw/.openclaw/workspace/coding-tasks`
-8. **Restart**: `sudo systemctl restart openclaw`
-9. **Verify**: ask the agent to run `coding_setup_status` — all checks should be green
+8. **Auth setup** — the CLIs need credentials accessible to the `openclaw` user:
+   - **API key mode**: set `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in the `envFile`
+   - **Subscription mode**: copy your CLI OAuth credentials to the openclaw user's home and set `"useSubscriptionAuth": true`:
+     ```bash
+     sudo cp ~/.claude/.credentials.json /var/lib/openclaw/.claude/.credentials.json
+     sudo cp ~/.codex/auth.json /var/lib/openclaw/.codex/auth.json
+     sudo chown openclaw:openclaw /var/lib/openclaw/.claude/.credentials.json /var/lib/openclaw/.codex/auth.json
+     sudo chmod 600 /var/lib/openclaw/.claude/.credentials.json /var/lib/openclaw/.codex/auth.json
+     ```
+     OAuth tokens expire (~24h), so set up a periodic sync (cron/systemd timer) from your user.
+9. **Restart**: `sudo systemctl restart openclaw`
+10. **Verify**: ask the agent to run `coding_setup_status` — all checks should be green
 
 ## Task lifecycle
 
