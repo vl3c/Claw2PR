@@ -11,6 +11,7 @@ type PluginConfig = {
   selfassemblerVenv?: string;
   envFile?: string;
   useSubscriptionAuth?: boolean;
+  dockerImage?: string;
 };
 
 const plugin = {

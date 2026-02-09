@@ -34,6 +34,10 @@
       "useSubscriptionAuth": {
         "type": "boolean",
         "description": "When true, strip ANTHROPIC_API_KEY and OPENAI_API_KEY from the task environment so Claude/Codex CLIs use subscription auth instead of API keys (default: false)"
+      },
+      "dockerImage": {
+        "type": "string",
+        "description": "Docker image for GritGuard sandbox. When set, uses Docker instead of srt/bwrap. Example: gritguard-sandbox-chromium:latest"
       }
     },
     "required": ["ghToken", "gitUserName", "gitUserEmail"]

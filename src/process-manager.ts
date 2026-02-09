@@ -35,6 +35,7 @@ export interface RunTaskOpts {
   pluginDir: string;
   envFile?: string;
   useSubscriptionAuth?: boolean;
+  dockerImage?: string;
 }
 
 export function spawnTask(
@@ -68,6 +69,7 @@ export function spawnTask(
     GIT_COMMITTER_EMAIL: opts.gitUserEmail,
     HOOK_TOKEN: opts.hookToken,
     PLUGIN_DIR: opts.pluginDir,
+    ...(opts.dockerImage && { GRITGUARD_DOCKER_IMAGE: opts.dockerImage }),
   };
 
   // When useSubscriptionAuth is enabled, strip API keys so CLIs
