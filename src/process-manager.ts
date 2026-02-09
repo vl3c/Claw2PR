@@ -34,6 +34,7 @@ export interface RunTaskOpts {
   hookToken: string;
   pluginDir: string;
   envFile?: string;
+  useSubscriptionAuth?: boolean;
 }
 
 export function spawnTask(
@@ -69,7 +70,12 @@ export function spawnTask(
     PLUGIN_DIR: opts.pluginDir,
   };
 
-  // Ensure ANTHROPIC_API_KEY is inherited (already in process.env)
+  // When useSubscriptionAuth is enabled, strip API keys so CLIs
+  // fall back to their stored subscription credentials
+  if (opts.useSubscriptionAuth) {
+    delete env.ANTHROPIC_API_KEY;
+    delete env.OPENAI_API_KEY;
+  }
 
   const child = spawn("bash", [opts.scriptPath], {
     env,

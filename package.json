@@ -4,6 +4,12 @@
   "description": "Coding task plugin for OpenClaw - clone repos, run SelfAssembler through GritGuard, produce PRs",
   "type": "module",
   "main": "index.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vl3c/coding-tool.git"
+  },
+  "keywords": ["openclaw", "plugin", "coding", "selfassembler", "gritguard", "sandbox"],
   "openclaw": {
     "extensions": [
       "./index.ts"

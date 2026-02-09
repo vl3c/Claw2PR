@@ -30,6 +30,10 @@
       "envFile": {
         "type": "string",
         "description": "Path to .env file with API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) passed to task processes"
+      },
+      "useSubscriptionAuth": {
+        "type": "boolean",
+        "description": "When true, strip ANTHROPIC_API_KEY and OPENAI_API_KEY from the task environment so Claude/Codex CLIs use subscription auth instead of API keys (default: false)"
       }
     },
     "required": ["ghToken", "gitUserName", "gitUserEmail"]
