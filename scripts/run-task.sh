@@ -16,7 +16,7 @@ mkdir -p "$TASK_DIR"
 # Redirect all output to log file
 exec > "$LOG_FILE" 2>&1
 
-echo "=== Coding Task: $TASK_ID ==="
+echo "=== Claw2PR Task: $TASK_ID ==="
 echo "Repo:   $REPO_URL"
 echo "Task:   $TASK_DESCRIPTION"
 echo "Name:   $TASK_NAME"
@@ -52,7 +52,7 @@ notify() {
             -H "Authorization: Bearer $HOOK_TOKEN" \
             -d "{
                 \"message\": \"$message\",
-                \"name\": \"CodingTool\",
+                \"name\": \"Claw2PR\",
                 \"wakeMode\": \"now\",
                 \"deliver\": true,
                 \"channel\": \"telegram\",
@@ -68,7 +68,7 @@ on_error() {
     echo "=== TASK FAILED (exit code: $exit_code) ==="
     echo "Failed at: $(date -Iseconds)"
     write_status "failed" "Task failed with exit code $exit_code"
-    notify "Coding task '$TASK_NAME' FAILED (task $TASK_ID). Check logs for details."
+    notify "Claw2PR task '$TASK_NAME' FAILED (task $TASK_ID). Check logs for details."
     exit $exit_code
 }
 trap on_error ERR
@@ -265,9 +265,9 @@ echo "Finished at: $(date -Iseconds)"
 write_status "completed" "Task completed successfully" "$PR_URL"
 
 if [[ -n "$PR_URL" ]]; then
-    notify "Coding task '$TASK_NAME' completed! PR: $PR_URL (task $TASK_ID)"
+    notify "Claw2PR task '$TASK_NAME' completed! PR: $PR_URL (task $TASK_ID)"
 elif [[ -n "$BRANCH_NAME" ]]; then
-    notify "Coding task '$TASK_NAME' completed on local repo. Branch: $BRANCH_NAME (task $TASK_ID)"
+    notify "Claw2PR task '$TASK_NAME' completed on local repo. Branch: $BRANCH_NAME (task $TASK_ID)"
 else
-    notify "Coding task '$TASK_NAME' completed (no PR created). Task $TASK_ID"
+    notify "Claw2PR task '$TASK_NAME' completed (no PR created). Task $TASK_ID"
 fi

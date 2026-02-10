@@ -103,7 +103,7 @@ export function spawnTask(
   };
 
   store.save(record);
-  console.log(`[coding-tool] Spawned task ${opts.taskId} (PID ${child.pid})`);
+  console.log(`[claw2pr] Spawned task ${opts.taskId} (PID ${child.pid})`);
   return record;
 }
 

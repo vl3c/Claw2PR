@@ -1,4 +1,4 @@
-# coding-tool — Project Rules & Integration Knowledge
+# Claw2PR — Project Rules & Integration Knowledge
 
 ## Rules
 
@@ -8,7 +8,7 @@
 
 OpenClaw plugin that spawns autonomous coding tasks. The pipeline:
 1. Plugin TypeScript code registers 5 tools with OpenClaw
-2. `coding_run_task` spawns `scripts/run-task.sh` as a detached process
+2. `claw2pr_run_task` spawns `scripts/run-task.sh` as a detached process
 3. run-task.sh: clone repo → configure SA → GritGuard sandbox → SelfAssembler
 4. On completion, POST to `/hooks/agent` with `sessionKey: "main"` (unsandboxed)
 
@@ -20,11 +20,11 @@ Two sandbox modes:
 
 | What | Path |
 |------|------|
-| Plugin source (dev) | `/home/<user>/agent/coding-tool/` |
-| Extensions symlink | `/var/lib/openclaw/.openclaw/extensions/coding-tool` → source |
+| Plugin source (dev) | `/home/<user>/agent/claw2pr/` |
+| Extensions symlink | `/var/lib/openclaw/.openclaw/extensions/claw2pr` → source |
 | SA venv | `/var/lib/openclaw/.openclaw/selfassembler-venv` |
-| Workspace | `/var/lib/openclaw/.openclaw/workspace/coding-tasks/` |
-| Task store | `.../coding-tasks/tasks.json` |
+| Workspace | `/var/lib/openclaw/.openclaw/workspace/claw2pr-tasks/` |
+| Task store | `.../claw2pr-tasks/tasks.json` |
 | OpenClaw config | `/var/lib/openclaw/.openclaw/openclaw.json` |
 | Claude auth | `/var/lib/openclaw/.claude/.credentials.json` |
 | Codex auth | `/var/lib/openclaw/.codex/auth.json` |
@@ -70,7 +70,7 @@ Two sandbox modes:
 **Fix**: Either install `gh` in the Docker image and mount auth, or configure SA to skip the gh preflight check for local repos.
 
 ### 8. Git dubious ownership in Docker container
-**Error**: `fatal: detected dubious ownership in repository at '/var/lib/openclaw/.openclaw/workspace/coding-tasks/.../repo'`
+**Error**: `fatal: detected dubious ownership in repository at '/var/lib/openclaw/.openclaw/workspace/claw2pr-tasks/.../repo'`
 **Root cause**: Docker runs as root but the repo was cloned by the host `openclaw` user. Git rejects operations on repos owned by different users.
 **Fix**: The wrapper script runs `git config --global --add safe.directory '*'` inside the container.
 
@@ -91,7 +91,7 @@ Two sandbox modes:
 ## Lessons Learned — OpenClaw Integration
 
 ### 12. Symlink traversal permissions
-**Problem**: openclaw user can't follow symlinks through `/home/<user>/agent/coding-tool`.
+**Problem**: openclaw user can't follow symlinks through `/home/<user>/agent/claw2pr`.
 **Fix**: Both `/home/<user>` and `/home/<user>/agent` need `o+x` (execute for others). `/home/<user>` has `0701`, `/home/<user>/agent` has `0755`.
 
 ### 13. Claude CLI must be copied, not symlinked
@@ -121,7 +121,7 @@ Two sandbox modes:
 
 - Plugin is TypeScript loaded directly (no build step)
 - Test changes by restarting openclaw: `sudo systemctl restart openclaw`
-- Check plugin load: `sudo journalctl -u openclaw -n 50 | grep coding-tool`
+- Check plugin load: `sudo journalctl -u openclaw -n 50 | grep claw2pr`
 - Task store uses atomic writes (tmp + rename) — same pattern as other plugins
 - Files in extensions dir written as openclaw user: `sudo -u openclaw tee`
 - `console.log()` in plugin code shows in journalctl

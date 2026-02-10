@@ -52,7 +52,7 @@ function elapsed(startedAt: string): string {
   return `${hrs}h ${mins % 60}m`;
 }
 
-export function createCodingTools(
+export function createClaw2prTools(
   config: PluginConfig,
   store: TaskStore,
   pluginDir: string,
@@ -70,14 +70,14 @@ export function createCodingTools(
   return [
     // ─── Run Task ──────────────────────────────────────────────
     {
-      label: "Run Coding Task",
-      name: "coding_run_task",
+      label: "Run Claw2PR Task",
+      name: "claw2pr_run_task",
       description:
-        "Start a new autonomous coding task. Clones a GitHub repository, runs the SelfAssembler " +
+        "Start a new autonomous Claw2PR task. Clones a GitHub repository, runs the SelfAssembler " +
         "multi-phase workflow (research → plan → implement → test → PR) through a GritGuard sandbox. " +
         "The task runs in the background and produces a pull request when complete. " +
         "You will be notified via Telegram when the task finishes or fails. " +
-        "Use coding_task_status to check progress.",
+        "Use claw2pr_task_status to check progress.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -149,7 +149,7 @@ export function createCodingTools(
         }
 
         // Validate config (ghToken only required for remote repos)
-        if (!isLocal && !config.ghToken) return err("GitHub token not configured. Use coding_setup_status to check.");
+        if (!isLocal && !config.ghToken) return err("GitHub token not configured. Use claw2pr_setup_status to check.");
 
         // Check concurrent limit
         store.cleanup();
@@ -157,7 +157,7 @@ export function createCodingTools(
         if (running >= maxConcurrent) {
           return err(
             `Concurrent task limit reached (${running}/${maxConcurrent} running). ` +
-            `Wait for a task to finish or cancel one with coding_cancel_task.`,
+            `Wait for a task to finish or cancel one with claw2pr_cancel_task.`,
           );
         }
 
@@ -188,7 +188,7 @@ export function createCodingTools(
           });
 
           return ok(
-            `Coding task started!\n` +
+            `Claw2PR task started!\n` +
             `  Task ID: ${record.taskId}\n` +
             `  Name: ${name}\n` +
             `  Repo: ${repo}\n` +
@@ -196,7 +196,7 @@ export function createCodingTools(
             `  Budget: $${budget}\n` +
             `  PID: ${record.pid}\n\n` +
             `The task is running in the background. You'll be notified when it completes.\n` +
-            `Use coding_task_status with taskId "${record.taskId}" to check progress.`,
+            `Use claw2pr_task_status with taskId "${record.taskId}" to check progress.`,
             { taskId: record.taskId, pid: record.pid, name },
           );
         } catch (e) {
@@ -208,7 +208,7 @@ export function createCodingTools(
     // ─── Task Status ───────────────────────────────────────────
     {
       label: "Check Task Status",
-      name: "coding_task_status",
+      name: "claw2pr_task_status",
       description:
         "Check the status of a coding task. Returns current status, phase, elapsed time, " +
         "PR URL (if complete), and the last 30 lines of the task log.",
@@ -217,7 +217,7 @@ export function createCodingTools(
         properties: {
           taskId: {
             type: "string",
-            description: "The task ID returned by coding_run_task",
+            description: "The task ID returned by claw2pr_run_task",
           },
         },
         required: ["taskId"],
@@ -301,10 +301,10 @@ export function createCodingTools(
 
     // ─── List Tasks ────────────────────────────────────────────
     {
-      label: "List Coding Tasks",
-      name: "coding_list_tasks",
+      label: "List Claw2PR Tasks",
+      name: "claw2pr_list_tasks",
       description:
-        "List all coding tasks with summary info. Optionally filter by status.",
+        "List all Claw2PR tasks with summary info. Optionally filter by status.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -328,7 +328,7 @@ export function createCodingTools(
           return ok(
             statusFilter
               ? `No ${statusFilter} tasks found.`
-              : "No coding tasks found.",
+              : "No Claw2PR tasks found.",
             { count: 0 },
           );
         }
@@ -349,10 +349,10 @@ export function createCodingTools(
 
     // ─── Cancel Task ───────────────────────────────────────────
     {
-      label: "Cancel Coding Task",
-      name: "coding_cancel_task",
+      label: "Cancel Claw2PR Task",
+      name: "claw2pr_cancel_task",
       description:
-        "Cancel a running coding task. Sends SIGTERM to the process group, " +
+        "Cancel a running Claw2PR task. Sends SIGTERM to the process group, " +
         "then SIGKILL after 5 seconds if still alive.",
       parameters: {
         type: "object" as const,
@@ -383,10 +383,10 @@ export function createCodingTools(
 
     // ─── Setup Status ──────────────────────────────────────────
     {
-      label: "Coding Tool Setup Status",
-      name: "coding_setup_status",
+      label: "Claw2PR Setup Status",
+      name: "claw2pr_setup_status",
       description:
-        "Check the coding tool plugin dependencies and configuration. " +
+        "Check the Claw2PR plugin dependencies and configuration. " +
         "Reports whether gritguard, srt, python3, selfassembler, claude CLI, gh CLI, " +
         "and API keys are available and properly configured.",
       parameters: {
@@ -474,7 +474,7 @@ export function createCodingTools(
         const total = store.list().length;
 
         return ok(
-          `Coding Tool Plugin Status:\n${checks.join("\n")}\n\n` +
+          `Claw2PR Plugin Status:\n${checks.join("\n")}\n\n` +
           `Tasks: ${running} running, ${total} total (max concurrent: ${maxConcurrent})`,
           { maxConcurrent, running, total },
         );

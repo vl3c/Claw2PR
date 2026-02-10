@@ -1,6 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { TaskStore } from "./src/task-store.js";
-import { createCodingTools } from "./src/tools.js";
+import { createClaw2prTools } from "./src/tools.js";
 
 type PluginConfig = {
   ghToken: string;
@@ -15,8 +15,8 @@ type PluginConfig = {
 };
 
 const plugin = {
-  id: "coding-tool",
-  name: "Coding Tool",
+  id: "claw2pr",
+  name: "Claw2PR",
   description: "Autonomous coding tasks — clone repos, run SelfAssembler through GritGuard, produce PRs",
 
   register(api: OpenClawPluginApi) {
@@ -27,7 +27,7 @@ const plugin = {
     };
 
     if (!config.ghToken) {
-      console.log("[coding-tool] Warning: ghToken not configured — tasks will fail until configured");
+      console.log("[claw2pr] Warning: ghToken not configured — tasks will fail until configured");
     }
 
     // Read hook token from openclaw config for notifications
@@ -37,7 +37,7 @@ const plugin = {
       const hooks = (fullConfig as any)?.hooks;
       if (hooks?.token) hookToken = hooks.token;
     } catch (e) {
-      console.log(`[coding-tool] Warning: could not read hook token: ${e}`);
+      console.log(`[claw2pr] Warning: could not read hook token: ${e}`);
     }
 
     // Determine plugin directory
@@ -47,19 +47,19 @@ const plugin = {
     } catch {
       pluginDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
     }
-    const workspaceDir = "/var/lib/openclaw/.openclaw/workspace/coding-tasks";
+    const workspaceDir = "/var/lib/openclaw/.openclaw/workspace/claw2pr-tasks";
 
     // Initialize task store and reconcile
     const store = new TaskStore(workspaceDir);
     store.reconcile();
 
     // Register tools
-    const tools = createCodingTools(config, store, pluginDir, hookToken);
+    const tools = createClaw2prTools(config, store, pluginDir, hookToken);
     for (const tool of tools) {
       api.registerTool(tool);
     }
 
-    console.log(`[coding-tool] Coding Tool plugin registered (${tools.length} tools)`);
+    console.log(`[claw2pr] Claw2PR plugin registered (${tools.length} tools)`);
   },
 };
 
