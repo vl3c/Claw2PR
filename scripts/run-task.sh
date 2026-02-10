@@ -47,17 +47,25 @@ STATUSEOF
 notify() {
     local message="$1"
     if [[ -n "${HOOK_TOKEN:-}" ]]; then
+        payload=$(python3 - "$message" <<'PY'
+import json
+import sys
+
+msg = sys.argv[1] if len(sys.argv) > 1 else ""
+print(json.dumps({
+    "message": msg,
+    "name": "Claw2PR",
+    "wakeMode": "now",
+    "deliver": True,
+    "channel": "telegram",
+    "sessionKey": "main",
+}))
+PY
+        )
         curl -s -X POST "http://127.0.0.1:18789/hooks/agent" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $HOOK_TOKEN" \
-            -d "{
-                \"message\": \"$message\",
-                \"name\": \"Claw2PR\",
-                \"wakeMode\": \"now\",
-                \"deliver\": true,
-                \"channel\": \"telegram\",
-                \"sessionKey\": \"main\"
-            }" || echo "[notify] Failed to send hook notification"
+            -d "$payload" || echo "[notify] Failed to send hook notification"
     fi
 }
 
@@ -89,7 +97,8 @@ if [[ "$REPO_URL" == /* ]]; then
     echo "Cloned local repo to $REPO_DIR"
 else
     # Remote repo — clone from GitHub with credentials
-    git_cred_helper="!f() { echo \"protocol=https\"; echo \"host=github.com\"; echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+    # Keep secrets out of .git/config by deferring $GH_TOKEN expansion to helper runtime.
+    git_cred_helper='!f() { echo "protocol=https"; echo "host=github.com"; echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
     git -c "credential.helper=$git_cred_helper" clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR"
     echo "Cloned remote repo to $REPO_DIR"
 fi
@@ -101,7 +110,8 @@ git config user.email "$GIT_AUTHOR_EMAIL"
 
 # Set up credential helper for pushes (remote repos)
 if [[ "$REPO_URL" != /* ]]; then
-    git config credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+    # Store helper with literal $GH_TOKEN so the token itself is not persisted in .git/config.
+    git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
 fi
 
 # Docker mode: local repo origins point to host paths that won't exist in the
@@ -110,7 +120,7 @@ if [[ "$REPO_URL" == /* ]] && [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
     REMOTE_URL=$(git -C "$REPO_URL" remote get-url origin 2>/dev/null || true)
     if [[ -n "$REMOTE_URL" ]]; then
         git remote set-url origin "$REMOTE_URL"
-        git config credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+        git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
         echo "Docker mode: rewrote origin to $REMOTE_URL"
     fi
 fi
