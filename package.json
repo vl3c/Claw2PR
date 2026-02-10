@@ -9,14 +9,25 @@
     "type": "git",
     "url": "https://github.com/vl3c/Claw2PR.git"
   },
-  "keywords": ["openclaw", "plugin", "coding", "selfassembler", "gritguard", "sandbox"],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "coding",
+    "selfassembler",
+    "gritguard",
+    "sandbox"
+  ],
   "openclaw": {
     "extensions": [
       "./index.ts"
     ]
   },
+  "scripts": {
+    "test": "node --test --import tsx test/**/*.test.ts"
+  },
   "devDependencies": {
     "openclaw": "^2026.1.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
