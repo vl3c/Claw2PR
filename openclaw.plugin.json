@@ -39,6 +39,10 @@
       "dockerImage": {
         "type": "string",
         "description": "Docker image for GritGuard sandbox. When set, uses Docker instead of srt/bwrap. Example: gritguard-sandbox-chromium:latest"
+      },
+      "workspaceDir": {
+        "type": "string",
+        "description": "Directory for task workspaces (default: $HOME/.openclaw/workspace/claw2pr-tasks)"
       }
     },
     "required": ["ghToken", "gitUserName", "gitUserEmail"]
