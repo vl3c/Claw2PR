@@ -13,7 +13,7 @@ export async function notifyAgent(
       },
       body: JSON.stringify({
         message,
-        name: "CodingTool",
+        name: "Claw2PR",
         wakeMode: "now",
         deliver: true,
         channel: "telegram",
@@ -22,15 +22,15 @@ export async function notifyAgent(
     });
 
     if (!resp.ok) {
-      console.log(`[coding-tool] Hook notification failed: ${resp.status} ${resp.statusText}`);
+      console.log(`[claw2pr] Hook notification failed: ${resp.status} ${resp.statusText}`);
       return false;
     }
 
     const data = (await resp.json()) as Record<string, unknown>;
-    console.log(`[coding-tool] Hook notification sent, runId: ${data.runId}`);
+    console.log(`[claw2pr] Hook notification sent, runId: ${data.runId}`);
     return true;
   } catch (e) {
-    console.log(`[coding-tool] Hook notification error: ${e instanceof Error ? e.message : String(e)}`);
+    console.log(`[claw2pr] Hook notification error: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
 }

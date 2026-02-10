@@ -62,7 +62,7 @@ export class TaskStore {
           task.finishedAt = new Date().toISOString();
           task.error = "Process died (detected on startup reconciliation)";
           changed = true;
-          console.log(`[coding-tool] Task ${id} marked failed: PID ${task.pid} not found`);
+          console.log(`[claw2pr] Task ${id} marked failed: PID ${task.pid} not found`);
         }
       }
     }
@@ -85,11 +85,11 @@ export class TaskStore {
             rmSync(task.workDir, { recursive: true, force: true });
           }
         } catch (e) {
-          console.log(`[coding-tool] Warning: failed to clean ${task.workDir}: ${e}`);
+          console.log(`[claw2pr] Warning: failed to clean ${task.workDir}: ${e}`);
         }
         delete tasks[id];
         changed = true;
-        console.log(`[coding-tool] Cleaned up expired task ${id}`);
+        console.log(`[claw2pr] Cleaned up expired task ${id}`);
       }
     }
     if (changed) this.writeAll(tasks);

@@ -1,13 +1,13 @@
 {
-  "name": "coding-tool",
+  "name": "claw2pr",
   "version": "1.0.0",
-  "description": "Coding task plugin for OpenClaw - clone repos, run SelfAssembler through GritGuard, produce PRs",
+  "description": "Claw2PR plugin for OpenClaw — autonomous coding tasks that produce PRs via SelfAssembler + GritGuard",
   "type": "module",
   "main": "index.ts",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vl3c/coding-tool.git"
+    "url": "https://github.com/vl3c/Claw2PR.git"
   },
   "keywords": ["openclaw", "plugin", "coding", "selfassembler", "gritguard", "sandbox"],
   "openclaw": {

@@ -1,13 +1,13 @@
-# coding-tool
+# Claw2PR
 
 An OpenClaw plugin that enables the agent to run autonomous coding tasks. Give it a repository and a task description — it clones the repo, runs [SelfAssembler](https://github.com/vl3c/SelfAssembler) (a multi-phase coding workflow) inside a [GritGuard](https://github.com/vl3c/GritGuard) sandbox, and produces a pull request (or a local branch for local repos).
 
-Typical use: tell the OpenClaw agent via Telegram "use the coding tool to implement feature X on repo Y" and come back to a finished PR.
+Typical use: tell the OpenClaw agent via Telegram "use claw2pr to implement feature X on repo Y" and come back to a finished PR.
 
 ## How it works
 
 ```
-User → Telegram → OpenClaw agent → coding_run_task tool
+User → Telegram → OpenClaw agent → claw2pr_run_task tool
                                          │
                                     run-task.sh (detached)
                                          │
@@ -40,11 +40,11 @@ SelfAssembler uses debate mode by default: Claude Code (primary) and Codex (seco
 
 | Tool | Description |
 |------|-------------|
-| `coding_run_task` | Start a new task (repo + description). Returns a task ID. |
-| `coding_task_status` | Check progress: current phase, elapsed time, log tail, PR URL. |
-| `coding_list_tasks` | List all tasks with summary info. Filter by status. |
-| `coding_cancel_task` | Kill a running task (SIGTERM → SIGKILL). |
-| `coding_setup_status` | Check all dependencies and config. |
+| `claw2pr_run_task` | Start a new task (repo + description). Returns a task ID. |
+| `claw2pr_task_status` | Check progress: current phase, elapsed time, log tail, PR URL. |
+| `claw2pr_list_tasks` | List all tasks with summary info. Filter by status. |
+| `claw2pr_cancel_task` | Kill a running task (SIGTERM → SIGKILL). |
+| `claw2pr_setup_status` | Check all dependencies and config. |
 
 ## Supported repos
 
@@ -54,7 +54,7 @@ SelfAssembler uses debate mode by default: Claude Code (primary) and Codex (seco
 ## Project structure
 
 ```
-coding-tool/
+claw2pr/
 ├── index.ts                  # Plugin entry — registers 5 tools
 ├── openclaw.plugin.json      # Plugin manifest with config schema
 ├── package.json
@@ -73,7 +73,7 @@ coding-tool/
 
 ## Configuration
 
-In `openclaw.json` under `plugins.entries.coding-tool.config`:
+In `openclaw.json` under `plugins.entries.claw2pr.config`:
 
 ```json
 {
@@ -112,23 +112,23 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
 4. **Install plugin** — either symlink or copy into extensions:
    ```bash
    # Option A: symlink (for development)
-   sudo -u openclaw ln -s /path/to/coding-tool /var/lib/openclaw/.openclaw/extensions/coding-tool
+   sudo -u openclaw ln -s /path/to/claw2pr /var/lib/openclaw/.openclaw/extensions/claw2pr
    # Make sure openclaw can traverse the symlink:
    chmod o+x /path/to /path/to/parent
 
    # Option B: copy (for production)
-   sudo -u openclaw cp -r /path/to/coding-tool /var/lib/openclaw/.openclaw/extensions/coding-tool
+   sudo -u openclaw cp -r /path/to/claw2pr /var/lib/openclaw/.openclaw/extensions/claw2pr
    ```
 5. **Register plugin in `openclaw.json`**:
    ```json
    {
      "plugins": {
-       "allow": ["coding-tool"],
+       "allow": ["claw2pr"],
        "load": {
-         "paths": ["/var/lib/openclaw/.openclaw/extensions/coding-tool"]
+         "paths": ["/var/lib/openclaw/.openclaw/extensions/claw2pr"]
        },
        "entries": {
-         "coding-tool": {
+         "claw2pr": {
            "enabled": true,
            "config": {
              "ghToken": "ghp_...",
@@ -141,7 +141,7 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
      }
    }
    ```
-   The plugin exposes its tools automatically — the agent will see `coding_run_task`, `coding_task_status`, etc. once loaded.
+   The plugin exposes its tools automatically — the agent will see `claw2pr_run_task`, `claw2pr_task_status`, etc. once loaded.
 6. **Enable hooks** (for task completion notifications):
    ```json
    {
@@ -152,7 +152,7 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
    }
    ```
    Without hooks, the agent won't be notified when tasks finish.
-7. **Create workspace**: `sudo -u openclaw mkdir -p /var/lib/openclaw/.openclaw/workspace/coding-tasks`
+7. **Create workspace**: `sudo -u openclaw mkdir -p /var/lib/openclaw/.openclaw/workspace/claw2pr-tasks`
 8. **Auth setup** — the CLIs need credentials accessible to the `openclaw` user:
    - **API key mode**: set `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in the `envFile`
    - **Subscription mode**: copy your CLI OAuth credentials to the openclaw user's home and set `"useSubscriptionAuth": true`:
@@ -164,11 +164,11 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
      ```
      OAuth tokens expire (~24h), so set up a periodic sync (cron/systemd timer) from your user.
 9. **Restart**: `sudo systemctl restart openclaw`
-10. **Verify**: ask the agent to run `coding_setup_status` — all checks should be green
+10. **Verify**: ask the agent to run `claw2pr_setup_status` — all checks should be green
 
 ## Task lifecycle
 
-1. Agent calls `coding_run_task` with repo URL and task description
+1. Agent calls `claw2pr_run_task` with repo URL and task description
 2. Plugin spawns `run-task.sh` as a detached process (survives OpenClaw restarts)
 3. Script clones repo, patches config, runs SelfAssembler through GritGuard
 4. SelfAssembler goes through ~15 phases with debate mode

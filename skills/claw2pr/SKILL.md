@@ -1,9 +1,9 @@
 ---
-name: coding
+name: claw2pr
 description: "Autonomous coding tasks. Delegate feature work, bug fixes, or refactors to a sandboxed agent pipeline that produces PRs or local branches."
 ---
 
-# Coding Tool
+# Claw2PR
 
 Delegate coding work to an autonomous pipeline: clone repo, research, plan, implement, test, review, and produce a PR or local branch. Uses SelfAssembler with debate mode (Claude + Codex) inside a GritGuard sandbox.
 
@@ -17,12 +17,12 @@ Do NOT use for quick edits, questions about code, or tasks that need interactive
 
 ## Workflow
 
-1. Run `coding_setup_status` first if unsure whether dependencies are configured
-2. Start a task with `coding_run_task`
+1. Run `claw2pr_setup_status` first if unsure whether dependencies are configured
+2. Start a task with `claw2pr_run_task`
 3. Inform the user that the task is running (typical runtime: 20-40 minutes)
 4. When notified of completion, relay the result (PR URL or branch name)
 
-The user can ask for status updates at any time — use `coding_task_status`.
+The user can ask for status updates at any time — use `claw2pr_task_status`.
 
 ## Starting a Task
 
