@@ -178,10 +178,27 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
 
 ## Lessons learned
 
-Things that broke during development and the fixes applied:
+Things that broke during development and the fixes applied. See `CLAUDE.md` for the full annotated list with error messages.
 
-- **SelfAssembler state directory**: SA writes checkpoints to `~/.local/state/selfassembler/` which was blocked by the sandbox. Fixed by adding `$HOME/.local/state` to GritGuard's `base.json` allowWrite.
-- **Git dirty worktree**: copying `selfassembler.yaml` into the repo before running made git dirty, failing preflight. Fixed by committing a `.gitignore` for SA artifacts before running.
-- **Worktree path outside sandbox**: SA's `.worktrees` directory defaulted to a path outside the sandbox's writable area. Fixed by setting `worktree_dir: "./.worktrees"` (inside repo, which is writable).
-- **Local repo push fails in sandbox**: `git push` to a local origin fails because the origin path isn't writable inside bwrap. Fixed by disabling `pr_creation` and `pr_self_review` phases for local repos.
-- **Subscription auth vs API keys**: Claude Code and Codex use OAuth credentials, not API keys. Inside the sandbox, auth files at `~/.claude/.credentials.json` and `~/.codex/auth.json` must be bind-mounted (GritGuard handles this). For testing, API keys can be injected via `envFile`.
+### Sandbox (srt/bwrap) issues
+
+- **SA state directory read-only**: SA writes checkpoints to `~/.local/state/selfassembler/`, blocked by sandbox. Fix: add `$HOME/.local/state` to GritGuard `base.json` allowWrite.
+- **Worktree path outside writable area**: SA's `.worktrees` defaulted outside the sandbox writable zone. Fix: set `worktree_dir: "./.worktrees"` (inside repo).
+- **Git dirty worktree fails preflight**: copying `selfassembler.yaml` makes the tree dirty. Fix: commit `.gitignore` for SA artifacts before running.
+- **Local repo push fails**: `git push` to a local origin (path-based) fails — origin path not writable in bwrap. Fix: disable `pr_creation` and `pr_self_review` phases for local repos.
+- **Subscription auth**: Claude Code and Codex use OAuth, not API keys. Auth files must be accessible inside the sandbox. GritGuard allowWrite includes `$HOME/.claude` and `$HOME/.codex`. Tokens expire (~24h) — set up periodic sync.
+
+### Docker mode issues
+
+- **selfassembler not found in container**: SA venv is bind-mounted but not on PATH. Fix: wrapper script (`.sa-wrapper.sh`) prepends venv bin to PATH.
+- **GitHub CLI missing/not authenticated**: Docker image lacks `gh` or auth. SA preflight fails. Fix: install `gh` in image, or skip gh check for local repos.
+- **Git dubious ownership**: Docker runs as root, repo owned by host user. Fix: `git config --global --add safe.directory '*'` in wrapper.
+- **Permission denied on venv writes**: Wrapper tried pip install into read-only mounted venv. Fix: use system pip (`/usr/bin/pip3 --break-system-packages`) for project deps.
+- **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: rewrite origin to real GitHub remote URL in Docker mode.
+
+### OpenClaw integration
+
+- **Symlink traversal**: openclaw needs `o+x` on parent dirs. `/home/erebus` → `0701`, `/home/erebus/agent` → `0755`.
+- **Claude CLI copied, not symlinked**: nvm path unreachable by openclaw. Copy binary to `/usr/local/bin/claude`.
+- **Hook sessionKey**: Use `sessionKey: "main"` for unsandboxed agent notification.
+- **Plugin manifest**: Newer OpenClaw requires `openclaw.plugin.json` with config schema.

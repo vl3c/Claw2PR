@@ -104,6 +104,17 @@ if [[ "$REPO_URL" != /* ]]; then
     git config credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
 fi
 
+# Docker mode: local repo origins point to host paths that won't exist in the
+# container. Rewrite origin to the real GitHub remote URL.
+if [[ "$REPO_URL" == /* ]] && [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
+    REMOTE_URL=$(git -C "$REPO_URL" remote get-url origin 2>/dev/null || true)
+    if [[ -n "$REMOTE_URL" ]]; then
+        git remote set-url origin "$REMOTE_URL"
+        git config credential.helper "!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f"
+        echo "Docker mode: rewrote origin to $REMOTE_URL"
+    fi
+fi
+
 echo ""
 
 # ─── Step 2: Copy SelfAssembler config ─────────────────────
@@ -123,7 +134,7 @@ fi
 
 # Ensure SelfAssembler artifacts are gitignored so preflight passes
 if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
-    printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n' >> "$REPO_DIR/.gitignore"
+    printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
     git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts" --no-verify
     echo "Added selfassembler artifacts to .gitignore"
 fi
@@ -152,15 +163,77 @@ echo ""
 
 # ─── Step 4: Run SelfAssembler through GritGuard ──────────
 echo "=== Step 4: Running SelfAssembler through GritGuard ==="
-echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
-echo ""
 
-"$GRITGUARD_PATH" \
-    selfassembler "$TASK_DESCRIPTION" \
-    --name "$TASK_NAME" \
-    --repo "$REPO_DIR" \
-    --no-approvals \
-    --budget "$BUDGET"
+if [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
+    # Docker mode: selfassembler lives in the host venv, which is mounted
+    # into the container. We need to prepend the venv bin to PATH inside
+    # the container so the selfassembler binary is found.
+    # Enable writable mode so the AI agent can pip install project deps.
+    export GRITGUARD_DOCKER_WRITABLE=1
+    echo "Docker mode: image=$GRITGUARD_DOCKER_IMAGE, venv=$SA_VENV"
+    echo "Command: $GRITGUARD_PATH bash -c 'export PATH=$SA_VENV/bin:\$PATH && selfassembler ...' --repo $REPO_DIR"
+    echo ""
+
+    # Write a wrapper script to avoid shell escaping issues with task descriptions.
+    # gritguard-docker passes argv safely to the container; the wrapper sets up
+    # PATH and env vars, then execs selfassembler with the original arguments.
+    # Note: gritguard-docker strips --repo from args, so we pass repo path
+    # as a positional arg to the wrapper and add --repo inside it.
+    WRAPPER="$REPO_DIR/.sa-wrapper.sh"
+    cat > "$WRAPPER" << 'WRAPPER_EOF'
+#!/bin/bash
+SA_VENV_BIN="$1"; shift
+REPO_PATH="$1"; shift
+export PATH="$SA_VENV_BIN:$PATH"
+export GH_TOKEN="$1"; shift
+export GIT_AUTHOR_NAME="$1"; shift
+export GIT_AUTHOR_EMAIL="$1"; shift
+export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+# Set HOME to match host user so Claude/Codex find their credentials
+export HOME="/var/lib/openclaw"
+# Docker runs as root but repo is owned by host user — tell git it's safe
+git config --global --add safe.directory "$REPO_PATH"
+# Also mark any worktree dirs as safe
+git config --global --add safe.directory '*'
+# Auto-install project dependencies using system pip (not venv pip).
+# The SA venv is mounted read-only from host; use /usr/bin/pip3 instead.
+cd "$REPO_PATH"
+if [ -f requirements.txt ]; then
+    /usr/bin/pip3 install --break-system-packages -q -r requirements.txt 2>&1 | tail -3
+fi
+if [ -f pyproject.toml ]; then
+    /usr/bin/pip3 install --break-system-packages -q -e ".[dev]" 2>/dev/null || \
+    /usr/bin/pip3 install --break-system-packages -q -e . 2>/dev/null || true
+fi
+exec selfassembler "$@" --repo "$REPO_PATH"
+WRAPPER_EOF
+    chmod +x "$WRAPPER"
+
+    "$GRITGUARD_PATH" \
+        bash "$WRAPPER" \
+        "$SA_VENV/bin" \
+        "$REPO_DIR" \
+        "$GH_TOKEN" \
+        "$GIT_AUTHOR_NAME" \
+        "$GIT_AUTHOR_EMAIL" \
+        "$TASK_DESCRIPTION" \
+        --name "$TASK_NAME" \
+        --no-approvals \
+        --budget "$BUDGET" \
+        --repo "$REPO_DIR"
+else
+    # srt/bwrap mode: venv was activated on the host, selfassembler is in PATH
+    echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
+    echo ""
+
+    "$GRITGUARD_PATH" \
+        selfassembler "$TASK_DESCRIPTION" \
+        --name "$TASK_NAME" \
+        --repo "$REPO_DIR" \
+        --no-approvals \
+        --budget "$BUDGET"
+fi
 
 echo ""
 echo "=== SelfAssembler completed ==="
