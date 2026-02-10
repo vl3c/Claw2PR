@@ -1,9 +1,8 @@
 import { spawn } from "node:child_process";
 import { TaskStore, type TaskRecord } from "./task-store.js";
-import { notifyAgent } from "./notifier.js";
 import { readFileSync, existsSync } from "node:fs";
 
-function loadEnvFile(path: string): Record<string, string> {
+export function loadEnvFile(path: string): Record<string, string> {
   const vars: Record<string, string> = {};
   if (!existsSync(path)) return vars;
   for (const line of readFileSync(path, "utf-8").split("\n")) {
@@ -11,7 +10,13 @@ function loadEnvFile(path: string): Record<string, string> {
     if (!trimmed || trimmed.startsWith("#")) continue;
     const eq = trimmed.indexOf("=");
     if (eq < 1) continue;
-    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
+    const key = trimmed.slice(0, eq);
+    let value = trimmed.slice(eq + 1);
+    // Strip surrounding single or double quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    vars[key] = value;
   }
   return vars;
 }
@@ -88,6 +93,10 @@ export function spawnTask(
 
   child.unref();
 
+  if (!child.pid) {
+    throw new Error("Failed to spawn task process — no PID returned");
+  }
+
   const record: TaskRecord = {
     taskId: opts.taskId,
     repo: opts.repo,
@@ -96,7 +105,7 @@ export function spawnTask(
     branch: opts.branch,
     budget: opts.budget,
     status: "running",
-    pid: child.pid!,
+    pid: child.pid,
     startedAt: new Date().toISOString(),
     workDir: taskDir,
     logFile,
