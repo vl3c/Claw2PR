@@ -50,9 +50,8 @@ export function createClaw2prTools(
 ) {
   const maxConcurrent = config.maxConcurrentTasks ?? 2;
   const defaultBudget = config.defaultBudget ?? 15;
-  const gritguardPath = config.dockerImage
-    ? `${pluginDir}/GritGuard/bin/gritguard-docker`
-    : `${pluginDir}/GritGuard/bin/gritguard`;
+  const gritguardBwrap = `${pluginDir}/GritGuard/bin/gritguard`;
+  const gritguardDocker = `${pluginDir}/GritGuard/bin/gritguard-docker`;
   const scriptPath = `${pluginDir}/scripts/run-task.sh`;
   const templatePath = `${pluginDir}/templates/selfassembler.yaml`;
   const saVenv = config.selfassemblerVenv ?? "/var/lib/openclaw/.openclaw/selfassembler-venv";
@@ -152,6 +151,11 @@ export function createClaw2prTools(
         const name = taskName || slugify(task);
 
         try {
+          // Local repos use bwrap (local paths aren't accessible inside Docker);
+          // remote repos use Docker when configured (Codex needs it), otherwise bwrap
+          const useDocker = !isLocal && !!config.dockerImage;
+          const gritguardPath = useDocker ? gritguardDocker : gritguardBwrap;
+
           const record = spawnTask(store, {
             taskId,
             repo,
@@ -171,7 +175,7 @@ export function createClaw2prTools(
             pluginDir,
             envFile: config.envFile,
             useSubscriptionAuth: config.useSubscriptionAuth,
-            dockerImage: config.dockerImage,
+            dockerImage: useDocker ? config.dockerImage : undefined,
           });
 
           return ok(
@@ -391,9 +395,14 @@ export function createClaw2prTools(
         };
 
         const checks = [
-          check("GritGuard", () => {
-            if (!existsSync(gritguardPath)) throw new Error(`not found at ${gritguardPath}`);
-            return gritguardPath;
+          check("GritGuard (bwrap)", () => {
+            if (!existsSync(gritguardBwrap)) throw new Error(`not found at ${gritguardBwrap}`);
+            return gritguardBwrap;
+          }),
+          check("GritGuard (docker)", () => {
+            if (!config.dockerImage) return "not configured (docker mode disabled)";
+            if (!existsSync(gritguardDocker)) throw new Error(`not found at ${gritguardDocker}`);
+            return `${gritguardDocker} (image: ${config.dockerImage})`;
           }),
           check("srt (sandbox-runtime)", () => {
             return execSync("which srt 2>/dev/null || echo 'not in PATH'", { encoding: "utf-8" }).trim();
