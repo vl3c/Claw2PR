@@ -5,7 +5,7 @@ description: "Autonomous coding tasks. Delegate feature work, bug fixes, or refa
 
 # Claw2PR
 
-Delegate coding work to an autonomous pipeline: clone repo, research, plan, implement, test, review, and produce a PR or local branch. Uses SelfAssembler with debate mode (Claude + Codex) inside a GritGuard sandbox.
+Delegate coding work to an autonomous pipeline: clone repo, research, plan, implement, test, review, and produce a PR or local branch. Uses SelfAssembler with feedback mode (Claude + Codex) inside a GritGuard sandbox.
 
 ## When to Use
 
@@ -99,4 +99,4 @@ On completion or failure, a notification is delivered automatically. Relay the r
 - OAuth tokens for Claude/Codex expire ~24h — tasks may fail if tokens are stale
 - Local repos skip PR creation (no remote to push to)
 - Sandbox restricts network access to known domains (GitHub, npm, PyPI, AI APIs)
-- Debate mode adds ~10 minutes but improves quality for research/planning/review phases
+- Feedback mode adds ~5 minutes per debate-enabled phase; full debate mode (`mode: debate`) adds ~10 minutes
