@@ -115,13 +115,17 @@ if [[ "$REPO_URL" != /* ]]; then
 fi
 
 # Docker mode: local repo origins point to host paths that won't exist in the
-# container. Rewrite origin to the real GitHub remote URL.
+# container. Rewrite origin to the real GitHub remote URL if available,
+# otherwise remove origin entirely so preflight doesn't fail on fetch.
 if [[ "$REPO_URL" == /* ]] && [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
     REMOTE_URL=$(git -C "$REPO_URL" remote get-url origin 2>/dev/null || true)
-    if [[ -n "$REMOTE_URL" ]]; then
+    if [[ -n "$REMOTE_URL" ]] && [[ "$REMOTE_URL" == https://* || "$REMOTE_URL" == git@* ]]; then
         git remote set-url origin "$REMOTE_URL"
         git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
         echo "Docker mode: rewrote origin to $REMOTE_URL"
+    else
+        git remote remove origin 2>/dev/null || true
+        echo "Docker mode: removed local origin (no reachable remote URL)"
     fi
 fi
 
