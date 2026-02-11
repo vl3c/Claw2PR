@@ -11,11 +11,13 @@ agent:
   dangerous_mode: true  # --dangerously-skip-permissions for unattended
 
 # Both Claude Code and Codex are available with subscription auth
-# SelfAssembler will auto-detect and enable debate mode if both installed
 debate:
   enabled: true
   primary_agent: "claude"
   secondary_agent: "codex"
+  mode: "feedback"      # secondary reviews primary's work (lightweight)
+  # mode: "debate"      # both generate independently, then exchange critiques
+  # intensity: "low"    # debate mode only: "low" (3 msgs) or "high" (5 msgs)
 
 git:
   base_branch: "main"
