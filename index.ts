@@ -1,18 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { TaskStore } from "./src/task-store.js";
 import { createClaw2prTools } from "./src/tools.js";
-
-type PluginConfig = {
-  ghToken: string;
-  gitUserName: string;
-  gitUserEmail: string;
-  defaultBudget?: number;
-  maxConcurrentTasks?: number;
-  selfassemblerVenv?: string;
-  envFile?: string;
-  useSubscriptionAuth?: boolean;
-  dockerImage?: string;
-};
+import type { PluginConfig } from "./src/types.js";
 
 const plugin = {
   id: "claw2pr",
@@ -47,7 +36,8 @@ const plugin = {
     } catch {
       pluginDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
     }
-    const workspaceDir = "/var/lib/openclaw/.openclaw/workspace/claw2pr-tasks";
+    const defaultWorkspace = `${process.env.HOME || "/var/lib/openclaw"}/.openclaw/workspace/claw2pr-tasks`;
+    const workspaceDir = config.workspaceDir || defaultWorkspace;
 
     // Initialize task store and reconcile
     const store = new TaskStore(workspaceDir);
