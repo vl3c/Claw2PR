@@ -11,30 +11,31 @@ User → Telegram → OpenClaw agent → claw2pr_run_task tool
                                          │
                                     run-task.sh (detached)
                                          │
-                          ┌──────────────────────────────┐
-                          │  git clone repo               │
-                          │  configure git identity       │
-                          │  copy selfassembler.yaml      │
-                          │  activate SA venv             │
-                          │  GritGuard sandbox (bwrap)    │
-                          │    └─ SelfAssembler           │
-                          │        ├─ research (debate)   │
-                          │        ├─ planning (debate)   │
-                          │        ├─ implementation      │
-                          │        ├─ test writing        │
-                          │        ├─ test execution      │
-                          │        ├─ code review (debate)│
-                          │        ├─ fix review issues   │
-                          │        ├─ commit & push       │
-                          │        └─ PR creation         │
-                          └──────────────────────────────┘
+                          ┌──────────────────────────────────┐
+                          │  git clone repo                   │
+                          │  configure git identity           │
+                          │  copy selfassembler.yaml          │
+                          │  activate SA venv                 │
+                          │  GritGuard sandbox (Docker/bwrap) │
+                          │    └─ SelfAssembler               │
+                          │        ├─ research (feedback)     │
+                          │        ├─ planning (feedback)     │
+                          │        ├─ plan review (feedback)  │
+                          │        ├─ implementation          │
+                          │        ├─ test writing            │
+                          │        ├─ test execution          │
+                          │        ├─ code review (feedback)  │
+                          │        ├─ fix review issues       │
+                          │        ├─ commit & push           │
+                          │        └─ PR creation             │
+                          └──────────────────────────────────┘
                                          │
                               notify agent via /hooks/agent
                                          │
                           Agent relays result to Telegram
 ```
 
-SelfAssembler uses debate mode by default: Claude Code (primary) and Codex (secondary) independently analyze the task, debate their findings, then synthesize a consensus before acting. This happens for research, planning, plan review, and code review phases.
+SelfAssembler uses feedback mode by default: Claude Code (primary) does the work, Codex (secondary) reviews it, and Claude incorporates the feedback. This happens for research, planning, plan review, and code review phases. For high-stakes tasks, switch to full debate mode (`mode: debate`) where both agents generate independently and exchange critiques.
 
 ## Tools
 
@@ -66,7 +67,7 @@ claw2pr/
 ├── scripts/
 │   └── run-task.sh           # Clone → configure → GritGuard → SelfAssembler
 ├── templates/
-│   └── selfassembler.yaml    # Default SA config (debate mode, no approvals)
+│   └── selfassembler.yaml    # Default SA config (feedback mode, no approvals)
 ├── GritGuard/                # Submodule — bubblewrap sandbox wrapper
 └── SelfAssembler/            # Submodule — multi-phase coding orchestrator
 ```
@@ -171,7 +172,7 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
 1. Agent calls `claw2pr_run_task` with repo URL and task description
 2. Plugin spawns `run-task.sh` as a detached process (survives OpenClaw restarts)
 3. Script clones repo, patches config, runs SelfAssembler through GritGuard
-4. SelfAssembler goes through ~15 phases with debate mode
+4. SelfAssembler goes through ~15 phases with feedback mode
 5. On completion, script writes `status.json` and POSTs to `/hooks/agent`
 6. Agent wakes up and relays the result (PR URL or error) to Telegram
 7. Workspaces auto-clean after 7 days
@@ -194,7 +195,7 @@ Things that broke during development and the fixes applied. See `CLAUDE.md` for 
 - **GitHub CLI missing/not authenticated**: Docker image lacks `gh` or auth. SA preflight fails. Fix: install `gh` in image, or skip gh check for local repos.
 - **Git dubious ownership**: Docker runs as root, repo owned by host user. Fix: `git config --global --add safe.directory '*'` in wrapper.
 - **Permission denied on venv writes**: Wrapper tried pip install into read-only mounted venv. Fix: use system pip (`/usr/bin/pip3 --break-system-packages`) for project deps.
-- **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: rewrite origin to real GitHub remote URL in Docker mode.
+- **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: SA preflight now detects and removes unreachable local-path origins automatically. run-task.sh also rewrites origin to a real GitHub remote URL when available as a fallback.
 
 ### OpenClaw integration
 
