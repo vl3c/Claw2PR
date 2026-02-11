@@ -11,23 +11,24 @@ User → Telegram → OpenClaw agent → claw2pr_run_task tool
                                          │
                                     run-task.sh (detached)
                                          │
-                          ┌──────────────────────────────┐
-                          │  git clone repo               │
-                          │  configure git identity       │
-                          │  copy selfassembler.yaml      │
-                          │  activate SA venv             │
-                          │  GritGuard sandbox (bwrap)    │
-                          │    └─ SelfAssembler           │
-                          │        ├─ research (debate)   │
-                          │        ├─ planning (debate)   │
-                          │        ├─ implementation      │
-                          │        ├─ test writing        │
-                          │        ├─ test execution      │
-                          │        ├─ code review (debate)│
-                          │        ├─ fix review issues   │
-                          │        ├─ commit & push       │
-                          │        └─ PR creation         │
-                          └──────────────────────────────┘
+                          ┌──────────────────────────────────┐
+                          │  git clone repo                   │
+                          │  configure git identity           │
+                          │  copy selfassembler.yaml          │
+                          │  activate SA venv                 │
+                          │  GritGuard sandbox (Docker/bwrap) │
+                          │    └─ SelfAssembler               │
+                          │        ├─ research (feedback)     │
+                          │        ├─ planning (feedback)     │
+                          │        ├─ plan review (feedback)  │
+                          │        ├─ implementation          │
+                          │        ├─ test writing            │
+                          │        ├─ test execution          │
+                          │        ├─ code review (feedback)  │
+                          │        ├─ fix review issues       │
+                          │        ├─ commit & push           │
+                          │        └─ PR creation             │
+                          └──────────────────────────────────┘
                                          │
                               notify agent via /hooks/agent
                                          │
@@ -194,7 +195,7 @@ Things that broke during development and the fixes applied. See `CLAUDE.md` for 
 - **GitHub CLI missing/not authenticated**: Docker image lacks `gh` or auth. SA preflight fails. Fix: install `gh` in image, or skip gh check for local repos.
 - **Git dubious ownership**: Docker runs as root, repo owned by host user. Fix: `git config --global --add safe.directory '*'` in wrapper.
 - **Permission denied on venv writes**: Wrapper tried pip install into read-only mounted venv. Fix: use system pip (`/usr/bin/pip3 --break-system-packages`) for project deps.
-- **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: rewrite origin to real GitHub remote URL in Docker mode.
+- **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: SA preflight now detects and removes unreachable local-path origins automatically. run-task.sh also rewrites origin to a real GitHub remote URL when available as a fallback.
 
 ### OpenClaw integration
 

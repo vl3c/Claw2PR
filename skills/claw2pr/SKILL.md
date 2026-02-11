@@ -69,7 +69,7 @@ Good: "Fix the race condition in src/worker.ts where concurrent requests can dou
 
 Returns: current phase, elapsed time, last 30 log lines, PR URL (if available).
 
-Phases run in order: preflight, setup, research, planning, implementation, test_writing, test_execution, code_review, fix_review_issues, lint_check, documentation, final_verification, commit_prep, conflict_check, pr_creation.
+Phases run in order: preflight, setup, research, planning, plan_review, implementation, test_writing, test_execution, code_review, fix_review_issues, lint_check, documentation, final_verification, commit_prep, conflict_check, pr_creation.
 
 ## Budget
 
