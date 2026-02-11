@@ -36,7 +36,11 @@ export class TaskStore {
     try {
       const raw = readFileSync(this.filePath, "utf-8");
       return JSON.parse(raw);
-    } catch {
+    } catch (e) {
+      // Distinguish missing file (normal) from corrupt file (data loss risk)
+      if (existsSync(this.filePath)) {
+        console.log(`[claw2pr] Warning: tasks.json is corrupt or unreadable: ${e}`);
+      }
       return {};
     }
   }

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { TaskStore, type TaskStatus } from "./task-store.js";
 import {
   spawnTask,
@@ -9,18 +10,7 @@ import {
   parsePrUrl,
   isProcessAlive,
 } from "./process-manager.js";
-
-type PluginConfig = {
-  ghToken: string;
-  gitUserName: string;
-  gitUserEmail: string;
-  defaultBudget?: number;
-  maxConcurrentTasks?: number;
-  selfassemblerVenv?: string;
-  envFile?: string;
-  useSubscriptionAuth?: boolean;
-  dockerImage?: string;
-};
+import type { PluginConfig } from "./types.js";
 
 function ok(text: string, details: Record<string, unknown> = {}) {
   return { content: [{ type: "text" as const, text }], details };
@@ -124,10 +114,8 @@ export function createClaw2prTools(
 
         if (isLocal) {
           try {
-            const { statSync } = await import("node:fs");
             const stat = statSync(repo);
             if (!stat.isDirectory()) return err(`Not a directory: ${repo}`);
-            const { execSync } = await import("node:child_process");
             execSync("git rev-parse --git-dir", { cwd: repo, encoding: "utf-8" });
           } catch (e) {
             return err(`Local repo not valid: ${e instanceof Error ? e.message : String(e)}`);
@@ -138,7 +126,6 @@ export function createClaw2prTools(
         if (!branch) {
           if (isLocal) {
             try {
-              const { execSync } = await import("node:child_process");
               branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: repo, encoding: "utf-8" }).trim();
             } catch {
               branch = "main";
@@ -235,7 +222,6 @@ export function createClaw2prTools(
           // Check for status file written by run-task.sh
           const statusFile = `${task.workDir}/status.json`;
           try {
-            const { readFileSync } = await import("node:fs");
             const statusData = JSON.parse(readFileSync(statusFile, "utf-8")) as Record<string, unknown>;
             const prUrl = typeof statusData.prUrl === "string" && statusData.prUrl ? statusData.prUrl : undefined;
             const status = statusData.status === "completed" ? "completed" as const : "failed" as const;
@@ -395,8 +381,6 @@ export function createClaw2prTools(
         required: [],
       },
       execute: async (_toolCallId: string, _args: unknown) => {
-        const { execSync } = await import("node:child_process");
-
         const check = (label: string, fn: () => string): string => {
           try {
             const result = fn();
@@ -434,7 +418,7 @@ export function createClaw2prTools(
           }),
           check("GH_TOKEN (config)", () => {
             if (!config.ghToken) throw new Error("not configured");
-            return `configured (${config.ghToken.slice(0, 6)}...)`;
+            return "configured (****)";
           }),
           check("Claude Code auth", () => {
             const home = process.env.HOME || "/var/lib/openclaw";

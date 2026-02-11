@@ -132,8 +132,8 @@ echo "=== Step 2: Configuring SelfAssembler ==="
 
 cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
 
-# Override base_branch in the config
-sed -i "s/base_branch: \"main\"/base_branch: \"$BASE_BRANCH\"/" "$REPO_DIR/selfassembler.yaml"
+# Override base_branch in the config (use | delimiter to avoid issues with / in branch names)
+sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
 
 # For local repos, disable PR creation phases (no GitHub remote to push to)
 if [[ "$REPO_URL" == /* ]]; then
@@ -145,7 +145,7 @@ fi
 # Ensure SelfAssembler artifacts are gitignored so preflight passes
 if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
     printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
-    git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts" --no-verify
+    git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
     echo "Added selfassembler artifacts to .gitignore"
 fi
 
@@ -204,8 +204,8 @@ export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 export HOME="/var/lib/openclaw"
 # Docker runs as root but repo is owned by host user — tell git it's safe
 git config --global --add safe.directory "$REPO_PATH"
-# Also mark any worktree dirs as safe
-git config --global --add safe.directory '*'
+# Also mark worktree subdirectory as safe
+git config --global --add safe.directory "$REPO_PATH/.worktrees"
 # Auto-install project dependencies using system pip (not venv pip).
 # The SA venv is mounted read-only from host; use /usr/bin/pip3 instead.
 cd "$REPO_PATH"
@@ -260,7 +260,7 @@ if [[ "$REPO_URL" == /* ]]; then
     echo "Local repo — branch: $BRANCH_NAME"
 else
     # Remote repo — extract PR URL from log
-    if PR_URL=$(grep -oP 'https://github\.com/[^\s]+/pull/\d+' "$LOG_FILE" | tail -1) && [[ -n "$PR_URL" ]]; then
+    if PR_URL=$(grep -oE 'https://github\.com/[^[:space:]]+/pull/[0-9]+' "$LOG_FILE" | tail -1) && [[ -n "$PR_URL" ]]; then
         echo "PR URL: $PR_URL"
     else
         echo "No PR URL found in output (task may not have created a PR)"
