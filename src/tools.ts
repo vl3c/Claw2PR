@@ -8,6 +8,7 @@ import {
   cancelTask,
   getTaskLog,
   parseCurrentPhase,
+  parseWorkflowProgress,
   parseCheckpointId,
   parsePrUrl,
   isProcessAlive,
@@ -199,8 +200,8 @@ export function createClaw2prTools(
       label: "Check Task Status",
       name: "claw2pr_task_status",
       description:
-        "Check the status of a coding task. Returns current status, phase, elapsed time, " +
-        "PR URL (if complete), and the last 30 lines of the task log.",
+        "Check the status of a coding task. Returns current phase, completed phases, " +
+        "elapsed time, cost, PR URL (if complete), errors, and recent log lines.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -256,31 +257,78 @@ export function createClaw2prTools(
 
         // Re-read after potential update
         const current = store.get(taskId)!;
-        const phase = current.status === "running" ? parseCurrentPhase(current.logFile) : "-";
         const elapsedStr = elapsed(current.startedAt);
         const prUrl = current.prUrl || parsePrUrl(current.logFile);
-        const log = getTaskLog(current.logFile, 30);
 
+        // Rich progress from both task.log and SA workflow log
+        const progress = current.status === "running" || current.status === "failed"
+          ? parseWorkflowProgress(current.workDir, current.logFile)
+          : null;
+
+        const statusLabel = current.status.toUpperCase();
+        const phaseLabel = progress?.currentPhase ?? "-";
+
+        // Header line: Task ID (name) — STATUS (phase: X), elapsed Ym.
         const lines = [
-          `Task: ${current.taskId}`,
-          `Name: ${current.taskName}`,
-          `Repo: ${current.repo}`,
-          `Status: ${current.status.toUpperCase()}`,
-          `Phase: ${phase}`,
-          `Elapsed: ${elapsedStr}`,
-          `Branch: ${current.branch}`,
-          `Budget: $${current.budget}`,
+          `Task ${current.taskId} (${current.taskName}) — ${statusLabel}` +
+            (phaseLabel !== "-" && phaseLabel !== "unknown" ? ` (phase: ${phaseLabel})` : "") +
+            `, elapsed ${elapsedStr}.`,
         ];
 
-        if (prUrl) lines.push(`PR: ${prUrl}`);
-        if (current.error) lines.push(`Error: ${current.error}`);
+        // Context line: Repo, branch, budget, cost
+        const costStr = progress && progress.totalCostUsd > 0
+          ? `, cost $${progress.totalCostUsd.toFixed(2)}`
+          : "";
+        lines.push(`Repo: ${current.repo} (base ${current.branch}), budget $${current.budget}${costStr}.`);
 
-        lines.push("", "─── Last 30 log lines ───", log);
+        // Pipeline step (run-task.sh progress)
+        if (progress && progress.pipelineStep !== "starting" && progress.pipelineStep !== "running selfassembler") {
+          lines.push(`Pipeline: ${progress.pipelineStep}.`);
+        }
+
+        // Completed phases
+        if (progress && progress.completedPhases.length > 0) {
+          lines.push(`Completed: ${progress.completedPhases.join(", ")}.`);
+        }
+
+        // Currently running phase (only show if distinct from completed)
+        if (progress && progress.currentPhase && !progress.currentPhase.includes("(done)") && !progress.currentPhase.includes("(failed)")) {
+          lines.push(`Currently in: ${progress.currentPhase} phase.`);
+        }
+
+        // PR URL
+        if (prUrl) lines.push(`PR: ${prUrl}`);
+
+        // Errors
+        if (progress?.failedPhase) {
+          lines.push(`Failed phase: ${progress.failedPhase}.`);
+        }
+        if (progress?.lastError) {
+          lines.push(`Error: ${progress.lastError}`);
+        } else if (current.error) {
+          lines.push(`Error: ${current.error}`);
+        }
+
+        // Checkpoint (for resume)
+        if (current.status === "failed") {
+          const checkpointId = parseCheckpointId(current.logFile);
+          if (checkpointId) {
+            lines.push(`Checkpoint: ${checkpointId} (resumable).`);
+          }
+        }
+
+        // Tail of log — fewer lines since the summary above provides context
+        const log = getTaskLog(current.logFile, 15);
+        lines.push("", "─── Recent log ───", log);
 
         return ok(lines.join("\n"), {
           taskId: current.taskId,
           status: current.status,
-          phase,
+          phase: phaseLabel,
+          pipelineStep: progress?.pipelineStep,
+          completedPhases: progress?.completedPhases,
+          totalCostUsd: progress?.totalCostUsd,
+          failedPhase: progress?.failedPhase,
           elapsed: elapsedStr,
           prUrl,
         });

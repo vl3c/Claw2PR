@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { TaskStore, type TaskRecord } from "./task-store.js";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 
 export function loadEnvFile(path: string): Record<string, string> {
   const vars: Record<string, string> = {};
@@ -160,21 +160,122 @@ export function getTaskLog(logFile: string, lines: number = 30): string {
   }
 }
 
+export interface WorkflowProgress {
+  currentPhase: string;
+  completedPhases: string[];
+  failedPhase: string | null;
+  totalCostUsd: number;
+  pipelineStep: string;  // run-task.sh step (clone, config, venv, running)
+  lastError: string | null;
+}
+
+/**
+ * Find the SA workflow log inside the task's repo/logs/ directory.
+ * SA names these: workflow-<taskname>-<timestamp>.log
+ */
+function findWorkflowLog(workDir: string): string | null {
+  const logsDir = `${workDir}/repo/logs`;
+  if (!existsSync(logsDir)) return null;
+  try {
+    const files = readdirSync(logsDir)
+      .filter(f => f.startsWith("workflow-") && f.endsWith(".log"))
+      .sort();
+    return files.length > 0 ? `${logsDir}/${files[files.length - 1]}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse progress from both the task.log (run-task.sh steps) and
+ * the SA workflow log (phase transitions, cost).
+ */
+export function parseWorkflowProgress(workDir: string, taskLogFile: string): WorkflowProgress {
+  const result: WorkflowProgress = {
+    currentPhase: "unknown",
+    completedPhases: [],
+    failedPhase: null,
+    totalCostUsd: 0,
+    pipelineStep: "starting",
+    lastError: null,
+  };
+
+  // 1. Parse run-task.sh pipeline step from task.log
+  try {
+    const taskLog = readFileSync(taskLogFile, "utf-8");
+    if (taskLog.includes("=== Step 4:")) result.pipelineStep = "running selfassembler";
+    else if (taskLog.includes("=== Step 3:")) result.pipelineStep = "activating venv";
+    else if (taskLog.includes("=== Step 2:")) result.pipelineStep = "configuring";
+    else if (taskLog.includes("=== Step 1:")) result.pipelineStep = "cloning repo";
+    if (taskLog.includes("=== SelfAssembler completed ===")) result.pipelineStep = "extracting results";
+    if (taskLog.includes("=== Task completed successfully ===")) result.pipelineStep = "completed";
+    if (taskLog.includes("=== TASK FAILED")) result.pipelineStep = "failed";
+
+    // Parse error from SA output in task.log
+    const errMatch = taskLog.match(/Error: Phase '(\w+)' failed: (.+?)(?:\n|$)/);
+    if (errMatch) {
+      result.failedPhase = errMatch[1];
+      result.lastError = errMatch[2].slice(0, 200);
+    }
+  } catch { /* ignore */ }
+
+  // 2. Parse SA workflow log for detailed phase progress
+  const wfLog = findWorkflowLog(workDir);
+  if (!wfLog) return result;
+
+  try {
+    const content = readFileSync(wfLog, "utf-8");
+
+    // Extract completed phases
+    const completed = [...content.matchAll(/phase_completed \(phase: (\w+)\)/g)];
+    result.completedPhases = completed.map(m => m[1]);
+
+    // Extract current/last started phase
+    const started = [...content.matchAll(/phase_starting \(phase: (\w+)\)/g)];
+    if (started.length > 0) {
+      const lastStarted = started[started.length - 1][1];
+      // If it's in completedPhases, current is "between phases" or done
+      if (result.completedPhases.includes(lastStarted)) {
+        result.currentPhase = lastStarted + " (done)";
+      } else {
+        result.currentPhase = lastStarted;
+      }
+    }
+
+    // Extract failed phase from workflow log
+    const failed = [...content.matchAll(/phase_failed \(phase: (\w+)\)/g)];
+    if (failed.length > 0) {
+      result.failedPhase = failed[failed.length - 1][1];
+      result.currentPhase = result.failedPhase + " (failed)";
+    }
+
+    // Sum cost from phase_attempt_complete entries
+    const costs = [...content.matchAll(/phase_attempt_complete[^]*?cost_usd: ([\d.]+)/g)];
+    result.totalCostUsd = costs.reduce((sum, m) => sum + parseFloat(m[1] || "0"), 0);
+
+    // Extract error details
+    const errors = [...content.matchAll(/phase_failed[\s\S]*?error: (.+?)(?:\n\n|$)/g)];
+    if (errors.length > 0) {
+      result.lastError = errors[errors.length - 1][1].slice(0, 200);
+    }
+  } catch { /* ignore */ }
+
+  return result;
+}
+
+/** Backward-compatible wrapper. */
 export function parseCurrentPhase(logFile: string): string {
+  // Try the old task.log parsing first
   try {
     const content = readFileSync(logFile, "utf-8");
-    // SelfAssembler logs phase transitions like: "=== Phase: research ==="
-    // or "[phase_name] Starting..."
     const phaseMatches = content.match(/(?:=== Phase: (\w+)|▶ Phase \d+\/\d+: (\w+)|\[(\w+)\] (?:Starting|Running))/g);
     if (phaseMatches && phaseMatches.length > 0) {
       const last = phaseMatches[phaseMatches.length - 1];
       const m = last.match(/(?:Phase: (\w+)|Phase \d+\/\d+: (\w+)|\[(\w+)\])/);
       if (m) return m[1] || m[2] || m[3] || "unknown";
     }
-    return "unknown";
-  } catch {
-    return "unknown";
-  }
+  } catch { /* ignore */ }
+  return "unknown";
 }
 
 export function parsePrUrl(logFile: string): string | undefined {
