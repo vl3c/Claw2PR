@@ -8,6 +8,7 @@ import {
   cancelTask,
   getTaskLog,
   parseCurrentPhase,
+  parseWorkflowProgress,
   parseCheckpointId,
   parsePrUrl,
   isProcessAlive,
@@ -199,8 +200,8 @@ export function createClaw2prTools(
       label: "Check Task Status",
       name: "claw2pr_task_status",
       description:
-        "Check the status of a coding task. Returns current status, phase, elapsed time, " +
-        "PR URL (if complete), and the last 30 lines of the task log.",
+        "Check the status of a coding task. Returns current phase, completed phases, " +
+        "elapsed time, cost, PR URL (if complete), errors, and recent log lines.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -256,31 +257,82 @@ export function createClaw2prTools(
 
         // Re-read after potential update
         const current = store.get(taskId)!;
-        const phase = current.status === "running" ? parseCurrentPhase(current.logFile) : "-";
         const elapsedStr = elapsed(current.startedAt);
         const prUrl = current.prUrl || parsePrUrl(current.logFile);
-        const log = getTaskLog(current.logFile, 30);
 
+        // Rich progress from both task.log and SA workflow log
+        const progress = current.status === "running" || current.status === "failed"
+          ? parseWorkflowProgress(current.workDir, current.logFile)
+          : null;
+
+        const statusLabel = current.status.toUpperCase();
+
+        // Resolve phase label: prefer SA workflow phase, fall back to pipeline step
+        let phaseLabel = "-";
+        if (progress) {
+          if (progress.currentPhase && progress.currentPhase !== "unknown") {
+            phaseLabel = progress.currentPhase;
+          } else if (progress.pipelineStep && progress.pipelineStep !== "starting") {
+            phaseLabel = progress.pipelineStep;
+          }
+        }
+
+        // Header line
         const lines = [
-          `Task: ${current.taskId}`,
-          `Name: ${current.taskName}`,
-          `Repo: ${current.repo}`,
-          `Status: ${current.status.toUpperCase()}`,
-          `Phase: ${phase}`,
-          `Elapsed: ${elapsedStr}`,
-          `Branch: ${current.branch}`,
-          `Budget: $${current.budget}`,
+          `Task ${current.taskId} (${current.taskName}) — ${statusLabel}` +
+            (phaseLabel !== "-" ? ` (${phaseLabel})` : "") +
+            `, elapsed ${elapsedStr}.`,
         ];
 
-        if (prUrl) lines.push(`PR: ${prUrl}`);
-        if (current.error) lines.push(`Error: ${current.error}`);
+        // Context line: Repo, branch, budget, cost
+        const costStr = progress && progress.totalCostUsd > 0
+          ? `, cost $${progress.totalCostUsd.toFixed(2)}`
+          : "";
+        lines.push(`Repo: ${current.repo} (base ${current.branch}), budget $${current.budget}${costStr}.`);
 
-        lines.push("", "─── Last 30 log lines ───", log);
+        // Completed phases
+        if (progress && progress.completedPhases.length > 0) {
+          lines.push(`Completed: ${progress.completedPhases.join(", ")}.`);
+        }
+
+        // Currently running phase (only if a real SA phase, not a pipeline step)
+        if (progress && progress.currentPhase && progress.currentPhase !== "unknown"
+            && !progress.currentPhase.includes("(done)") && !progress.currentPhase.includes("(failed)")) {
+          lines.push(`Currently in: ${progress.currentPhase}.`);
+        }
+
+        // PR URL
+        if (prUrl) lines.push(`PR: ${prUrl}`);
+
+        // Errors
+        if (progress?.failedPhase) {
+          lines.push(`Failed phase: ${progress.failedPhase}.`);
+        }
+        if (progress?.lastError) {
+          lines.push(`Error: ${progress.lastError}`);
+        } else if (current.error) {
+          lines.push(`Error: ${current.error}`);
+        }
+
+        // Checkpoint (for resume)
+        if (current.status === "failed") {
+          const checkpointId = parseCheckpointId(current.logFile);
+          if (checkpointId) {
+            lines.push(`Checkpoint: ${checkpointId} (resumable).`);
+          }
+        }
+
+        // Tail of log
+        const log = getTaskLog(current.logFile, 15);
+        lines.push("", "─── Recent log ───", log);
 
         return ok(lines.join("\n"), {
           taskId: current.taskId,
           status: current.status,
-          phase,
+          phase: phaseLabel,
+          completedPhases: progress?.completedPhases ?? [],
+          costUsd: progress?.totalCostUsd ?? 0,
+          failedPhase: progress?.failedPhase ?? null,
           elapsed: elapsedStr,
           prUrl,
         });
@@ -366,6 +418,69 @@ export function createClaw2prTools(
           return ok(`Task ${taskId} cancelled (PID ${task.pid} terminated).`, { taskId, cancelled: true });
         }
         return err(`Failed to cancel task ${taskId}`);
+      },
+    },
+
+    // ─── Cleanup Task ─────────────────────────────────────────
+    {
+      label: "Cleanup Claw2PR Task",
+      name: "claw2pr_cleanup_task",
+      description:
+        "Remove a finished task's workspace directory and task store entry. " +
+        "Handles root-owned files left by Docker sandbox runs by using a " +
+        "disposable container for removal. Only works on non-running tasks.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          taskId: {
+            type: "string",
+            description: "The task ID to clean up",
+          },
+        },
+        required: ["taskId"],
+      },
+      execute: async (_toolCallId: string, args: unknown) => {
+        const params = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+        const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
+        if (!taskId) return err("Missing 'taskId'");
+
+        const task = store.get(taskId);
+        if (!task) return err(`Task '${taskId}' not found`);
+        if (task.status === "running") return err(`Task '${taskId}' is still running — cancel it first`);
+
+        const workDir = task.workDir;
+        const removed: string[] = [];
+
+        // Remove workspace directory
+        if (existsSync(workDir)) {
+          try {
+            // Try normal removal first
+            execSync(`rm -rf ${JSON.stringify(workDir)}`, { timeout: 10_000 });
+            removed.push("workspace (direct rm)");
+          } catch {
+            // Permission denied — root-owned files from Docker.
+            // Use a disposable container to remove them.
+            try {
+              execSync(
+                `docker run --rm -v ${JSON.stringify(workDir)}:/cleanup alpine rm -rf /cleanup`,
+                { timeout: 30_000 },
+              );
+              // Container empties the bind-mount contents; remove the now-empty host dir
+              try { execSync(`rmdir ${JSON.stringify(workDir)}`, { timeout: 5_000 }); } catch { /* ok */ }
+              removed.push("workspace (via docker)");
+            } catch (e) {
+              return err(`Failed to remove ${workDir}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+        } else {
+          removed.push("workspace (already gone)");
+        }
+
+        // Remove from task store
+        store.remove(taskId);
+        removed.push("task store entry");
+
+        return ok(`Cleaned up task ${taskId}: ${removed.join(", ")}.`, { taskId, removed });
       },
     },
 

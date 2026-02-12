@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join, dirname } from "node:path";
 
 export type TaskStatus = "running" | "completed" | "failed" | "cancelled";
@@ -83,13 +84,21 @@ export class TaskStore {
       if (task.status === "running") continue;
       const fin = task.finishedAt ? new Date(task.finishedAt).getTime() : 0;
       if (fin > 0 && fin < cutoff) {
-        // Remove workspace directory
-        try {
-          if (existsSync(task.workDir)) {
+        // Remove workspace directory (may contain root-owned files from Docker)
+        if (existsSync(task.workDir)) {
+          try {
             rmSync(task.workDir, { recursive: true, force: true });
+          } catch {
+            try {
+              execSync(
+                `docker run --rm -v ${JSON.stringify(task.workDir)}:/cleanup alpine rm -rf /cleanup`,
+                { timeout: 30_000 },
+              );
+              try { execSync(`rmdir ${JSON.stringify(task.workDir)}`, { timeout: 5_000 }); } catch { /* ok */ }
+            } catch (e) {
+              console.log(`[claw2pr] Warning: failed to clean ${task.workDir}: ${e}`);
+            }
           }
-        } catch (e) {
-          console.log(`[claw2pr] Warning: failed to clean ${task.workDir}: ${e}`);
         }
         delete tasks[id];
         changed = true;
@@ -122,6 +131,14 @@ export class TaskStore {
     if (!existing) return;
     tasks[taskId] = { ...existing, ...patch };
     this.writeAll(tasks);
+  }
+
+  remove(taskId: string): boolean {
+    const tasks = this.readAll();
+    if (!(taskId in tasks)) return false;
+    delete tasks[taskId];
+    this.writeAll(tasks);
+    return true;
   }
 
   countRunning(): number {
