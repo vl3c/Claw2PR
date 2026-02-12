@@ -390,6 +390,11 @@ export function createClaw2prTools(
             type: "number",
             description: `Additional budget in USD for the resumed task (default: ${defaultBudget})`,
           },
+          skipPhases: {
+            type: "string",
+            description: "Comma-separated phases to skip on resume (e.g., 'lint_check,documentation'). "
+              + "Persistent: skipped phases stay skipped on future resumes.",
+          },
         },
         required: ["taskId"],
       },
@@ -397,6 +402,7 @@ export function createClaw2prTools(
         const params = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
         const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
         const budget = typeof params.budget === "number" ? params.budget : defaultBudget;
+        const skipPhases = typeof params.skipPhases === "string" ? params.skipPhases.trim() : undefined;
 
         if (!taskId) return err("Missing 'taskId'");
 
@@ -441,6 +447,7 @@ export function createClaw2prTools(
             envFile: config.envFile,
             useSubscriptionAuth: config.useSubscriptionAuth,
             dockerImage: config.dockerImage,
+            skipPhases,
           });
 
           return ok(
@@ -457,6 +464,82 @@ export function createClaw2prTools(
         } catch (e) {
           return err(`Failed to resume task: ${e instanceof Error ? e.message : String(e)}`);
         }
+      },
+    },
+
+    // ─── Diagnose Task ──────────────────────────────────────────
+    {
+      label: "Diagnose Claw2PR Task",
+      name: "claw2pr_diagnose_task",
+      description:
+        "Diagnose a failed Claw2PR task without triggering a resume. Reads the task log, " +
+        "extracts the failed phase, error summary, checkpoint ID, and last 50 log lines. " +
+        "Use this to understand why a task failed before deciding to resume or start fresh.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          taskId: {
+            type: "string",
+            description: "The task ID to diagnose",
+          },
+        },
+        required: ["taskId"],
+      },
+      execute: async (_toolCallId: string, args: unknown) => {
+        const params = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+        const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
+        if (!taskId) return err("Missing 'taskId'");
+
+        const task = store.get(taskId);
+        if (!task) return err(`Task '${taskId}' not found`);
+
+        const phase = parseCurrentPhase(task.logFile);
+        const checkpointId = parseCheckpointId(task.logFile);
+        const prUrl = parsePrUrl(task.logFile);
+        const log = getTaskLog(task.logFile, 50);
+
+        // Extract error lines from log
+        const logLines = log.split("\n");
+        const errorLines = logLines.filter(
+          (l) => /error|failed|traceback|exception/i.test(l) && !/^\s*$/.test(l),
+        ).slice(-10);
+
+        const lines = [
+          `Diagnosis for task: ${taskId}`,
+          `Name: ${task.taskName}`,
+          `Repo: ${task.repo}`,
+          `Status: ${task.status.toUpperCase()}`,
+          `Last phase: ${phase}`,
+          `Elapsed: ${elapsed(task.startedAt)}`,
+          `Checkpoint: ${checkpointId || "(none)"}`,
+        ];
+
+        if (prUrl) lines.push(`PR: ${prUrl}`);
+        if (task.error) lines.push(`Error: ${task.error}`);
+
+        if (errorLines.length > 0) {
+          lines.push("", "─── Error summary ───");
+          lines.push(...errorLines);
+        }
+
+        lines.push("", "─── Last 50 log lines ───", log);
+
+        if (checkpointId) {
+          lines.push(
+            "",
+            "─── Resume options ───",
+            `Resume: claw2pr_resume_task with taskId="${taskId}"`,
+            `Skip failed phase: claw2pr_resume_task with taskId="${taskId}", skipPhases="${phase}"`,
+          );
+        }
+
+        return ok(lines.join("\n"), {
+          taskId,
+          status: task.status,
+          phase,
+          checkpointId,
+          errorCount: errorLines.length,
+        });
       },
     },
 

@@ -225,6 +225,7 @@ export interface ResumeTaskOpts {
   envFile?: string;
   useSubscriptionAuth?: boolean;
   dockerImage?: string;
+  skipPhases?: string;
 }
 
 export function spawnResumeTask(
@@ -260,6 +261,7 @@ export function spawnResumeTask(
     PLUGIN_DIR: opts.pluginDir,
     RESUME_CHECKPOINT: opts.checkpointId,
     ...(opts.dockerImage && { GRITGUARD_DOCKER_IMAGE: opts.dockerImage }),
+    ...(opts.skipPhases && { SKIP_PHASES: opts.skipPhases }),
   };
 
   if (opts.useSubscriptionAuth) {
