@@ -223,6 +223,15 @@ export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 # Set HOME to match host user so Claude/Codex find their credentials
 export HOME="/var/lib/openclaw"
+# Docker runs as root — restore file ownership to the host user on exit.
+# Detect the original owner from the repo dir (created by host user before Docker).
+TASK_BASE="$(dirname "$REPO_PATH")"
+OWNER_UID=$(stat -c %u "$TASK_BASE")
+OWNER_GID=$(stat -c %g "$TASK_BASE")
+restore_ownership() {
+    chown -R "$OWNER_UID:$OWNER_GID" "$TASK_BASE" 2>/dev/null || true
+}
+trap restore_ownership EXIT
 # Docker runs as root but repo is owned by host user — tell git it's safe
 git config --global --add safe.directory "$REPO_PATH"
 # Also mark worktree subdirectory as safe
@@ -237,7 +246,7 @@ if [ -f pyproject.toml ]; then
     /usr/bin/pip3 install --break-system-packages -q -e ".[dev]" 2>/dev/null || \
     /usr/bin/pip3 install --break-system-packages -q -e . 2>/dev/null || true
 fi
-exec selfassembler "$@" --repo "$REPO_PATH"
+selfassembler "$@" --repo "$REPO_PATH"
 WRAPPER_EOF
     chmod +x "$WRAPPER"
 

@@ -84,29 +84,34 @@ Two sandbox modes:
 **Root cause**: Docker writable mode wasn't properly configured, or the log directory ownership didn't match.
 **Fix**: Set `GRITGUARD_DOCKER_WRITABLE=1` env var before calling gritguard-docker.
 
-### 11. Local repo origin inaccessible from Docker container
+### 11. Root-owned files after Docker run block host user
+**Error**: `Permission denied: '/.../repo/logs'` when openclaw tries to resume or read task files after a Docker run.
+**Root cause**: Docker runs as root. All files created inside the bind-mounted task directory (logs, plans, worktrees, __pycache__, .git refs) end up owned by `root:root`. The host `openclaw` user can't write to them.
+**Fix**: The `.sa-wrapper.sh` script (generated in run-task.sh) detects the host user's UID/GID from the task directory at startup, then sets an EXIT trap that runs `chown -R` to restore ownership before the container exits. This covers both success and failure paths.
+
+### 12. Local repo origin inaccessible from Docker container
 **Root cause**: Local repo clones have origin pointing to a host filesystem path (e.g., `/var/lib/openclaw/code/MatHud`). This path doesn't exist inside the Docker container.
 **Fix**: In run-task.sh, detect Docker mode + local repo and rewrite origin to the real GitHub remote URL: `git remote set-url origin $REMOTE_URL`.
 
 ## Lessons Learned — OpenClaw Integration
 
-### 12. Symlink traversal permissions
+### 13. Symlink traversal permissions
 **Problem**: openclaw user can't follow symlinks through `/home/<user>/agent/claw2pr`.
 **Fix**: Both `/home/<user>` and `/home/<user>/agent` need `o+x` (execute for others). `/home/<user>` has `0701`, `/home/<user>/agent` has `0755`.
 
-### 13. Claude CLI must be copied, not symlinked
+### 14. Claude CLI must be copied, not symlinked
 **Problem**: nvm-installed Claude CLI lives under `/home/<user>/.nvm/...` — openclaw can't traverse.
 **Fix**: Copy the actual binary: `sudo cp $(which claude) /usr/local/bin/claude`. Codex works as a symlink because its nvm path is under the traversable `/home/<user>/agent/.nvm/`.
 
-### 14. Hook notification needs sessionKey: "main"
+### 15. Hook notification needs sessionKey: "main"
 **Problem**: Default hook sessions are sandboxed — agent can't use skills or full capabilities.
 **Fix**: POST to `/hooks/agent` with `sessionKey: "main"` runs on the main unsandboxed session.
 
-### 15. OAuth tokens expire
+### 16. OAuth tokens expire
 **Context**: Subscription auth tokens expire (~24h).
 **Mitigation**: Set up periodic cron/systemd timer to sync auth from your user to openclaw user.
 
-### 16. Plugin manifest required for newer OpenClaw
+### 17. Plugin manifest required for newer OpenClaw
 **Context**: OpenClaw now requires `openclaw.plugin.json` manifest with config schema.
 **File**: `openclaw.plugin.json` defines required/optional config fields with types and defaults.
 

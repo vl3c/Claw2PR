@@ -208,6 +208,7 @@ Things that broke during development and the fixes applied. See `CLAUDE.md` for 
 - **GitHub CLI missing/not authenticated**: Docker image lacks `gh` or auth. SA preflight fails. Fix: install `gh` in image, or skip gh check for local repos.
 - **Git dubious ownership**: Docker runs as root, repo owned by host user. Fix: `git config --global --add safe.directory '*'` in wrapper.
 - **Permission denied on venv writes**: Wrapper tried pip install into read-only mounted venv. Fix: use system pip (`/usr/bin/pip3 --break-system-packages`) for project deps.
+- **Root-owned files block host user**: Docker runs as root, creating `root:root` files in the bind-mounted workspace. Fix: `.sa-wrapper.sh` detects the host UID/GID and runs `chown -R` on EXIT to restore ownership.
 - **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: SA preflight now detects and removes unreachable local-path origins automatically. run-task.sh also rewrites origin to a real GitHub remote URL when available as a fallback.
 
 ### OpenClaw integration
