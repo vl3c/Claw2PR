@@ -201,8 +201,10 @@ export function parseCheckpointId(logFile: string): string | undefined {
   try {
     const content = readFileSync(logFile, "utf-8");
     // SelfAssembler logs: "Resume with: selfassembler --resume checkpoint_XXXXXXXX"
-    const m = content.match(/Resume with: selfassembler --resume (checkpoint_[a-f0-9]+)/);
-    return m ? m[1] : undefined;
+    // Use matchAll and return the last match — resume appends to the same log,
+    // so a failed resume adds a newer checkpoint line below the original.
+    const matches = [...content.matchAll(/Resume with: selfassembler --resume (checkpoint_[A-Za-z0-9_-]+)/g)];
+    return matches.length > 0 ? matches[matches.length - 1][1] : undefined;
   } catch {
     return undefined;
   }

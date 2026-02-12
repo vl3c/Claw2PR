@@ -72,6 +72,26 @@ test("parseCheckpointId extracts checkpoint from log", () => {
   });
 });
 
+test("parseCheckpointId returns the latest checkpoint when log has multiple", () => {
+  withTempDir((dir) => {
+    const logFile = join(dir, "task.log");
+    writeFileSync(
+      logFile,
+      [
+        "Phase failed: test_execution",
+        "Resume with: selfassembler --resume checkpoint_898bf920",
+        "Workflow failed: my-task",
+        "",
+        "=== RESUMING FROM CHECKPOINT ===",
+        "Phase failed: code_review",
+        "Resume with: selfassembler --resume checkpoint_69018d4c",
+        "Workflow failed: my-task",
+      ].join("\n"),
+    );
+    assert.equal(parseCheckpointId(logFile), "checkpoint_69018d4c");
+  });
+});
+
 test("parseCheckpointId returns undefined when no checkpoint in log", () => {
   withTempDir((dir) => {
     const logFile = join(dir, "task.log");
