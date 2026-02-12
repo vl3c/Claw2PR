@@ -196,3 +196,96 @@ export function isProcessAlive(pid: number): boolean {
     return false;
   }
 }
+
+export function parseCheckpointId(logFile: string): string | undefined {
+  try {
+    const content = readFileSync(logFile, "utf-8");
+    // SelfAssembler logs: "Resume with: selfassembler --resume checkpoint_XXXXXXXX"
+    const m = content.match(/Resume with: selfassembler --resume (checkpoint_[a-f0-9]+)/);
+    return m ? m[1] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface ResumeTaskOpts {
+  taskId: string;
+  checkpointId: string;
+  budget: number;
+  scriptPath: string;
+  gritguardPath: string;
+  selfassemblerVenv: string;
+  ghToken: string;
+  gitUserName: string;
+  gitUserEmail: string;
+  hookToken: string;
+  pluginDir: string;
+  envFile?: string;
+  useSubscriptionAuth?: boolean;
+  dockerImage?: string;
+}
+
+export function spawnResumeTask(
+  store: TaskStore,
+  opts: ResumeTaskOpts,
+): TaskRecord {
+  const task = store.get(opts.taskId);
+  if (!task) throw new Error(`Task '${opts.taskId}' not found`);
+
+  // Load API keys from env file if configured
+  const envFileVars = opts.envFile ? loadEnvFile(opts.envFile) : {};
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    ...envFileVars,
+    TASK_ID: opts.taskId,
+    REPO_URL: task.repo,
+    TASK_DESCRIPTION: task.task,
+    TASK_NAME: task.taskName,
+    BASE_BRANCH: task.branch,
+    BUDGET: String(opts.budget),
+    TASK_DIR: task.workDir,
+    LOG_FILE: task.logFile,
+    GRITGUARD_PATH: opts.gritguardPath,
+    SA_VENV: opts.selfassemblerVenv,
+    SA_TEMPLATE: "", // Not needed for resume
+    GH_TOKEN: opts.ghToken,
+    GIT_AUTHOR_NAME: opts.gitUserName,
+    GIT_AUTHOR_EMAIL: opts.gitUserEmail,
+    GIT_COMMITTER_NAME: opts.gitUserName,
+    GIT_COMMITTER_EMAIL: opts.gitUserEmail,
+    HOOK_TOKEN: opts.hookToken,
+    PLUGIN_DIR: opts.pluginDir,
+    RESUME_CHECKPOINT: opts.checkpointId,
+    ...(opts.dockerImage && { GRITGUARD_DOCKER_IMAGE: opts.dockerImage }),
+  };
+
+  if (opts.useSubscriptionAuth) {
+    delete env.ANTHROPIC_API_KEY;
+    delete env.OPENAI_API_KEY;
+  }
+
+  const child = spawn("bash", [opts.scriptPath], {
+    env,
+    detached: true,
+    stdio: "ignore",
+    cwd: opts.pluginDir,
+  });
+
+  child.unref();
+
+  if (!child.pid) {
+    throw new Error("Failed to spawn resume process — no PID returned");
+  }
+
+  store.update(opts.taskId, {
+    status: "running",
+    pid: child.pid,
+    budget: opts.budget,
+    finishedAt: undefined,
+    error: undefined,
+  });
+
+  console.log(`[claw2pr] Resumed task ${opts.taskId} from ${opts.checkpointId} (PID ${child.pid})`);
+  return store.get(opts.taskId)!;
+}

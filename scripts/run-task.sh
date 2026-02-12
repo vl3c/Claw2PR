@@ -7,14 +7,23 @@
 #   GH_TOKEN, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL
 #   HOOK_TOKEN, PLUGIN_DIR
 #   Optional: ANTHROPIC_API_KEY, OPENAI_API_KEY (stripped when useSubscriptionAuth is enabled)
+#   Optional: RESUME_CHECKPOINT — when set, resume from this checkpoint instead of starting fresh
 
 set -euo pipefail
 
 # Ensure task directory exists
 mkdir -p "$TASK_DIR"
 
-# Redirect all output to log file
-exec > "$LOG_FILE" 2>&1
+# Redirect all output to log file (append in resume mode to preserve history)
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+    exec >> "$LOG_FILE" 2>&1
+    echo ""
+    echo "========================================"
+    echo "=== RESUMING FROM CHECKPOINT ==="
+    echo "========================================"
+else
+    exec > "$LOG_FILE" 2>&1
+fi
 
 echo "=== Claw2PR Task: $TASK_ID ==="
 echo "Repo:   $REPO_URL"
@@ -81,80 +90,90 @@ on_error() {
 }
 trap on_error ERR
 
-# ─── Step 1: Clone / copy repository ─────────────────────────
-echo "=== Step 1: Preparing repository ==="
-
-export GIT_TERMINAL_PROMPT=0
-
-if [[ "$REPO_URL" == /* ]]; then
-    # Local repo — clone from local path
-    echo "Local repo detected: $REPO_URL"
-    git clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR" 2>&1 || {
-        # If branch doesn't exist, clone default branch
-        echo "Branch '$BASE_BRANCH' not found, cloning default branch..."
-        git clone "$REPO_URL" "$REPO_DIR" 2>&1
-    }
-    echo "Cloned local repo to $REPO_DIR"
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+    # ─── Resume mode: skip clone and config ─────────────────────
+    echo "=== RESUME MODE ==="
+    echo "Checkpoint: $RESUME_CHECKPOINT"
+    echo ""
+    echo "Skipping steps 1-2 (repo and config already exist from original run)"
+    cd "$REPO_DIR"
+    export GIT_TERMINAL_PROMPT=0
 else
-    # Remote repo — clone from GitHub with credentials
-    # Keep secrets out of .git/config by deferring $GH_TOKEN expansion to helper runtime.
-    git_cred_helper='!f() { echo "protocol=https"; echo "host=github.com"; echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
-    git -c "credential.helper=$git_cred_helper" clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR"
-    echo "Cloned remote repo to $REPO_DIR"
-fi
+    # ─── Step 1: Clone / copy repository ─────────────────────────
+    echo "=== Step 1: Preparing repository ==="
 
-# Configure git identity in the cloned repo
-cd "$REPO_DIR"
-git config user.name "$GIT_AUTHOR_NAME"
-git config user.email "$GIT_AUTHOR_EMAIL"
+    export GIT_TERMINAL_PROMPT=0
 
-# Set up credential helper for pushes (remote repos)
-if [[ "$REPO_URL" != /* ]]; then
-    # Store helper with literal $GH_TOKEN so the token itself is not persisted in .git/config.
-    git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
-fi
-
-# Docker mode: local repo origins point to host paths that won't exist in the
-# container. Rewrite origin to the real GitHub remote URL if available,
-# otherwise remove origin entirely so preflight doesn't fail on fetch.
-if [[ "$REPO_URL" == /* ]] && [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
-    REMOTE_URL=$(git -C "$REPO_URL" remote get-url origin 2>/dev/null || true)
-    if [[ -n "$REMOTE_URL" ]] && [[ "$REMOTE_URL" == https://* || "$REMOTE_URL" == git@* ]]; then
-        git remote set-url origin "$REMOTE_URL"
-        git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
-        echo "Docker mode: rewrote origin to $REMOTE_URL"
+    if [[ "$REPO_URL" == /* ]]; then
+        # Local repo — clone from local path
+        echo "Local repo detected: $REPO_URL"
+        git clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR" 2>&1 || {
+            # If branch doesn't exist, clone default branch
+            echo "Branch '$BASE_BRANCH' not found, cloning default branch..."
+            git clone "$REPO_URL" "$REPO_DIR" 2>&1
+        }
+        echo "Cloned local repo to $REPO_DIR"
     else
-        git remote remove origin 2>/dev/null || true
-        echo "Docker mode: removed local origin (no reachable remote URL)"
+        # Remote repo — clone from GitHub with credentials
+        # Keep secrets out of .git/config by deferring $GH_TOKEN expansion to helper runtime.
+        git_cred_helper='!f() { echo "protocol=https"; echo "host=github.com"; echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
+        git -c "credential.helper=$git_cred_helper" clone --branch "$BASE_BRANCH" "$REPO_URL" "$REPO_DIR"
+        echo "Cloned remote repo to $REPO_DIR"
     fi
+
+    # Configure git identity in the cloned repo
+    cd "$REPO_DIR"
+    git config user.name "$GIT_AUTHOR_NAME"
+    git config user.email "$GIT_AUTHOR_EMAIL"
+
+    # Set up credential helper for pushes (remote repos)
+    if [[ "$REPO_URL" != /* ]]; then
+        # Store helper with literal $GH_TOKEN so the token itself is not persisted in .git/config.
+        git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
+    fi
+
+    # Docker mode: local repo origins point to host paths that won't exist in the
+    # container. Rewrite origin to the real GitHub remote URL if available,
+    # otherwise remove origin entirely so preflight doesn't fail on fetch.
+    if [[ "$REPO_URL" == /* ]] && [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
+        REMOTE_URL=$(git -C "$REPO_URL" remote get-url origin 2>/dev/null || true)
+        if [[ -n "$REMOTE_URL" ]] && [[ "$REMOTE_URL" == https://* || "$REMOTE_URL" == git@* ]]; then
+            git remote set-url origin "$REMOTE_URL"
+            git config credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
+            echo "Docker mode: rewrote origin to $REMOTE_URL"
+        else
+            git remote remove origin 2>/dev/null || true
+            echo "Docker mode: removed local origin (no reachable remote URL)"
+        fi
+    fi
+
+    echo ""
+
+    # ─── Step 2: Copy SelfAssembler config ─────────────────────
+    echo "=== Step 2: Configuring SelfAssembler ==="
+
+    cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
+
+    # Override base_branch in the config (use | delimiter to avoid issues with / in branch names)
+    sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
+
+    # For local repos, disable PR creation phases (no GitHub remote to push to)
+    if [[ "$REPO_URL" == /* ]]; then
+        sed -i '/^  pr_creation:/,/^  [a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
+        sed -i '/^  pr_self_review:/,/^[a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
+        echo "Disabled pr_creation and pr_self_review for local repo"
+    fi
+
+    # Ensure SelfAssembler artifacts are gitignored so preflight passes
+    if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
+        printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
+        git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
+        echo "Added selfassembler artifacts to .gitignore"
+    fi
+
+    echo "Config copied and patched (base_branch=$BASE_BRANCH)"
+    echo ""
 fi
-
-echo ""
-
-# ─── Step 2: Copy SelfAssembler config ─────────────────────
-echo "=== Step 2: Configuring SelfAssembler ==="
-
-cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
-
-# Override base_branch in the config (use | delimiter to avoid issues with / in branch names)
-sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
-
-# For local repos, disable PR creation phases (no GitHub remote to push to)
-if [[ "$REPO_URL" == /* ]]; then
-    sed -i '/^  pr_creation:/,/^  [a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
-    sed -i '/^  pr_self_review:/,/^[a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
-    echo "Disabled pr_creation and pr_self_review for local repo"
-fi
-
-# Ensure SelfAssembler artifacts are gitignored so preflight passes
-if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
-    printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
-    git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
-    echo "Added selfassembler artifacts to .gitignore"
-fi
-
-echo "Config copied and patched (base_branch=$BASE_BRANCH)"
-echo ""
 
 # ─── Step 3: Activate SelfAssembler venv ───────────────────
 echo "=== Step 3: Activating SelfAssembler venv ==="
@@ -185,8 +204,6 @@ if [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
     # Enable writable mode so the AI agent can pip install project deps.
     export GRITGUARD_DOCKER_WRITABLE=1
     echo "Docker mode: image=$GRITGUARD_DOCKER_IMAGE, venv=$SA_VENV"
-    echo "Command: $GRITGUARD_PATH bash -c 'export PATH=$SA_VENV/bin:\$PATH && selfassembler ...' --repo $REPO_DIR"
-    echo ""
 
     # Write a wrapper script to avoid shell escaping issues with task descriptions.
     # gritguard-docker passes argv safely to the container; the wrapper sets up
@@ -224,29 +241,63 @@ exec selfassembler "$@" --repo "$REPO_PATH"
 WRAPPER_EOF
     chmod +x "$WRAPPER"
 
-    "$GRITGUARD_PATH" \
-        bash "$WRAPPER" \
-        "$SA_VENV/bin" \
-        "$REPO_DIR" \
-        "$GH_TOKEN" \
-        "$GIT_AUTHOR_NAME" \
-        "$GIT_AUTHOR_EMAIL" \
-        "$TASK_DESCRIPTION" \
-        --name "$TASK_NAME" \
-        --no-approvals \
-        --budget "$BUDGET" \
-        --repo "$REPO_DIR"
+    if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+        echo "RESUME mode: checkpoint=$RESUME_CHECKPOINT"
+        echo "Command: $GRITGUARD_PATH bash .sa-wrapper.sh ... --resume $RESUME_CHECKPOINT --repo $REPO_DIR"
+        echo ""
+
+        "$GRITGUARD_PATH" \
+            bash "$WRAPPER" \
+            "$SA_VENV/bin" \
+            "$REPO_DIR" \
+            "$GH_TOKEN" \
+            "$GIT_AUTHOR_NAME" \
+            "$GIT_AUTHOR_EMAIL" \
+            --resume "$RESUME_CHECKPOINT" \
+            --no-approvals \
+            --budget "$BUDGET" \
+            --repo "$REPO_DIR"
+    else
+        echo "Command: $GRITGUARD_PATH bash -c 'export PATH=$SA_VENV/bin:\$PATH && selfassembler ...' --repo $REPO_DIR"
+        echo ""
+
+        "$GRITGUARD_PATH" \
+            bash "$WRAPPER" \
+            "$SA_VENV/bin" \
+            "$REPO_DIR" \
+            "$GH_TOKEN" \
+            "$GIT_AUTHOR_NAME" \
+            "$GIT_AUTHOR_EMAIL" \
+            "$TASK_DESCRIPTION" \
+            --name "$TASK_NAME" \
+            --no-approvals \
+            --budget "$BUDGET" \
+            --repo "$REPO_DIR"
+    fi
 else
     # srt/bwrap mode: venv was activated on the host, selfassembler is in PATH
-    echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
-    echo ""
+    if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+        echo "RESUME mode: checkpoint=$RESUME_CHECKPOINT"
+        echo "Command: $GRITGUARD_PATH selfassembler --resume $RESUME_CHECKPOINT --repo $REPO_DIR --no-approvals --budget $BUDGET"
+        echo ""
 
-    "$GRITGUARD_PATH" \
-        selfassembler "$TASK_DESCRIPTION" \
-        --name "$TASK_NAME" \
-        --repo "$REPO_DIR" \
-        --no-approvals \
-        --budget "$BUDGET"
+        "$GRITGUARD_PATH" \
+            selfassembler \
+            --resume "$RESUME_CHECKPOINT" \
+            --repo "$REPO_DIR" \
+            --no-approvals \
+            --budget "$BUDGET"
+    else
+        echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
+        echo ""
+
+        "$GRITGUARD_PATH" \
+            selfassembler "$TASK_DESCRIPTION" \
+            --name "$TASK_NAME" \
+            --repo "$REPO_DIR" \
+            --no-approvals \
+            --budget "$BUDGET"
+    fi
 fi
 
 echo ""
