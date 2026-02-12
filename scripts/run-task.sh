@@ -253,6 +253,7 @@ WRAPPER_EOF
     if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
         echo "RESUME mode: checkpoint=$RESUME_CHECKPOINT"
         echo "Command: $GRITGUARD_PATH bash .sa-wrapper.sh ... --resume $RESUME_CHECKPOINT --repo $REPO_DIR"
+        [[ -n "${SKIP_PHASES:-}" ]] && echo "Skip phases: $SKIP_PHASES"
         echo ""
 
         "$GRITGUARD_PATH" \
@@ -265,6 +266,7 @@ WRAPPER_EOF
             --resume "$RESUME_CHECKPOINT" \
             --no-approvals \
             --budget "$BUDGET" \
+            ${SKIP_PHASES:+--skip-phases "$SKIP_PHASES"} \
             --repo "$REPO_DIR"
     else
         echo "Command: $GRITGUARD_PATH bash -c 'export PATH=$SA_VENV/bin:\$PATH && selfassembler ...' --repo $REPO_DIR"
@@ -288,6 +290,7 @@ else
     if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
         echo "RESUME mode: checkpoint=$RESUME_CHECKPOINT"
         echo "Command: $GRITGUARD_PATH selfassembler --resume $RESUME_CHECKPOINT --repo $REPO_DIR --no-approvals --budget $BUDGET"
+        [[ -n "${SKIP_PHASES:-}" ]] && echo "Skip phases: $SKIP_PHASES"
         echo ""
 
         "$GRITGUARD_PATH" \
@@ -295,7 +298,8 @@ else
             --resume "$RESUME_CHECKPOINT" \
             --repo "$REPO_DIR" \
             --no-approvals \
-            --budget "$BUDGET"
+            --budget "$BUDGET" \
+            ${SKIP_PHASES:+--skip-phases "$SKIP_PHASES"}
     else
         echo "Command: $GRITGUARD_PATH selfassembler \"$TASK_DESCRIPTION\" --name $TASK_NAME --repo $REPO_DIR --no-approvals --budget $BUDGET"
         echo ""
