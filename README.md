@@ -2,12 +2,12 @@
 
 An OpenClaw plugin that enables the agent to run autonomous coding tasks. Give it a repository and a task description — it clones the repo, runs [SelfAssembler](https://github.com/vl3c/SelfAssembler) (a multi-phase coding workflow) inside a [GritGuard](https://github.com/vl3c/GritGuard) sandbox, and produces a pull request (or a local branch for local repos).
 
-Typical use: tell the OpenClaw agent via Telegram "use claw2pr to implement feature X on repo Y" and come back to a finished PR.
+Typical use: tell the OpenClaw agent via chat "use claw2pr to implement feature X on repo Y" and come back to a finished PR.
 
 ## How it works
 
 ```
-User → Telegram → OpenClaw agent → claw2pr_run_task tool
+User → Chat app → OpenClaw agent → claw2pr_run_task tool
                                          │
                                     run-task.sh (detached)
                                          │
