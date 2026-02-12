@@ -421,6 +421,69 @@ export function createClaw2prTools(
       },
     },
 
+    // ─── Cleanup Task ─────────────────────────────────────────
+    {
+      label: "Cleanup Claw2PR Task",
+      name: "claw2pr_cleanup_task",
+      description:
+        "Remove a finished task's workspace directory and task store entry. " +
+        "Handles root-owned files left by Docker sandbox runs by using a " +
+        "disposable container for removal. Only works on non-running tasks.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          taskId: {
+            type: "string",
+            description: "The task ID to clean up",
+          },
+        },
+        required: ["taskId"],
+      },
+      execute: async (_toolCallId: string, args: unknown) => {
+        const params = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+        const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
+        if (!taskId) return err("Missing 'taskId'");
+
+        const task = store.get(taskId);
+        if (!task) return err(`Task '${taskId}' not found`);
+        if (task.status === "running") return err(`Task '${taskId}' is still running — cancel it first`);
+
+        const workDir = task.workDir;
+        const removed: string[] = [];
+
+        // Remove workspace directory
+        if (existsSync(workDir)) {
+          try {
+            // Try normal removal first
+            execSync(`rm -rf ${JSON.stringify(workDir)}`, { timeout: 10_000 });
+            removed.push("workspace (direct rm)");
+          } catch {
+            // Permission denied — root-owned files from Docker.
+            // Use a disposable container to remove them.
+            try {
+              execSync(
+                `docker run --rm -v ${JSON.stringify(workDir)}:/cleanup alpine rm -rf /cleanup`,
+                { timeout: 30_000 },
+              );
+              // Container empties the bind-mount contents; remove the now-empty host dir
+              try { execSync(`rmdir ${JSON.stringify(workDir)}`, { timeout: 5_000 }); } catch { /* ok */ }
+              removed.push("workspace (via docker)");
+            } catch (e) {
+              return err(`Failed to remove ${workDir}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+        } else {
+          removed.push("workspace (already gone)");
+        }
+
+        // Remove from task store
+        store.remove(taskId);
+        removed.push("task store entry");
+
+        return ok(`Cleaned up task ${taskId}: ${removed.join(", ")}.`, { taskId, removed });
+      },
+    },
+
     // ─── Resume Task ───────────────────────────────────────────
     {
       label: "Resume Claw2PR Task",
