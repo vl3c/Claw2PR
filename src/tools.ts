@@ -266,12 +266,21 @@ export function createClaw2prTools(
           : null;
 
         const statusLabel = current.status.toUpperCase();
-        const phaseLabel = progress?.currentPhase ?? "-";
 
-        // Header line: Task ID (name) — STATUS (phase: X), elapsed Ym.
+        // Resolve phase label: prefer SA workflow phase, fall back to pipeline step
+        let phaseLabel = "-";
+        if (progress) {
+          if (progress.currentPhase && progress.currentPhase !== "unknown") {
+            phaseLabel = progress.currentPhase;
+          } else if (progress.pipelineStep && progress.pipelineStep !== "starting") {
+            phaseLabel = progress.pipelineStep;
+          }
+        }
+
+        // Header line
         const lines = [
           `Task ${current.taskId} (${current.taskName}) — ${statusLabel}` +
-            (phaseLabel !== "-" && phaseLabel !== "unknown" ? ` (phase: ${phaseLabel})` : "") +
+            (phaseLabel !== "-" ? ` (${phaseLabel})` : "") +
             `, elapsed ${elapsedStr}.`,
         ];
 
@@ -281,19 +290,15 @@ export function createClaw2prTools(
           : "";
         lines.push(`Repo: ${current.repo} (base ${current.branch}), budget $${current.budget}${costStr}.`);
 
-        // Pipeline step (run-task.sh progress)
-        if (progress && progress.pipelineStep !== "starting" && progress.pipelineStep !== "running selfassembler") {
-          lines.push(`Pipeline: ${progress.pipelineStep}.`);
-        }
-
         // Completed phases
         if (progress && progress.completedPhases.length > 0) {
           lines.push(`Completed: ${progress.completedPhases.join(", ")}.`);
         }
 
-        // Currently running phase (only show if distinct from completed)
-        if (progress && progress.currentPhase && !progress.currentPhase.includes("(done)") && !progress.currentPhase.includes("(failed)")) {
-          lines.push(`Currently in: ${progress.currentPhase} phase.`);
+        // Currently running phase (only if a real SA phase, not a pipeline step)
+        if (progress && progress.currentPhase && progress.currentPhase !== "unknown"
+            && !progress.currentPhase.includes("(done)") && !progress.currentPhase.includes("(failed)")) {
+          lines.push(`Currently in: ${progress.currentPhase}.`);
         }
 
         // PR URL
@@ -317,7 +322,7 @@ export function createClaw2prTools(
           }
         }
 
-        // Tail of log — fewer lines since the summary above provides context
+        // Tail of log
         const log = getTaskLog(current.logFile, 15);
         lines.push("", "─── Recent log ───", log);
 
@@ -325,10 +330,9 @@ export function createClaw2prTools(
           taskId: current.taskId,
           status: current.status,
           phase: phaseLabel,
-          pipelineStep: progress?.pipelineStep,
-          completedPhases: progress?.completedPhases,
-          totalCostUsd: progress?.totalCostUsd,
-          failedPhase: progress?.failedPhase,
+          completedPhases: progress?.completedPhases ?? [],
+          costUsd: progress?.totalCostUsd ?? 0,
+          failedPhase: progress?.failedPhase ?? null,
           elapsed: elapsedStr,
           prUrl,
         });
