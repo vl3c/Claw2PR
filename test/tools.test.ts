@@ -453,6 +453,212 @@ test("cancel_task rejects non-running task", async () => {
   }
 });
 
+// ─── claw2pr_resume_task tests ──────────────────────────────
+
+test("resume_task rejects missing taskId", async () => {
+  const { dir, findTool } = makeTestEnv();
+  try {
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", {});
+    assert.ok(getText(result).includes("Error: Missing 'taskId'"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task rejects unknown task", async () => {
+  const { dir, findTool } = makeTestEnv();
+  try {
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "nonexistent" });
+    assert.ok(getText(result).includes("not found"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task rejects running task", async () => {
+  const { dir, store, findTool } = makeTestEnv();
+  try {
+    store.save({
+      taskId: "running-1",
+      repo: "/some/repo",
+      task: "do something",
+      taskName: "test-task",
+      branch: "main",
+      budget: 10,
+      status: "running",
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      workDir: dir,
+      logFile: join(dir, "task.log"),
+    });
+
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "running-1" });
+    assert.ok(getText(result).includes("still running"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task rejects completed task", async () => {
+  const { dir, store, findTool } = makeTestEnv();
+  try {
+    store.save({
+      taskId: "done-1",
+      repo: "/some/repo",
+      task: "do something",
+      taskName: "test-task",
+      branch: "main",
+      budget: 10,
+      status: "completed",
+      pid: 12345,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      workDir: dir,
+      logFile: join(dir, "task.log"),
+    });
+
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "done-1" });
+    assert.ok(getText(result).includes("already completed"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task rejects task without checkpoint", async () => {
+  const { dir, store, findTool } = makeTestEnv();
+  try {
+    const logFile = join(dir, "no-checkpoint.log");
+    writeFileSync(logFile, "=== Phase: research ===\nSome output\nNo checkpoint here\n");
+
+    store.save({
+      taskId: "fail-no-cp",
+      repo: "/some/repo",
+      task: "do something",
+      taskName: "test-task",
+      branch: "main",
+      budget: 10,
+      status: "failed",
+      pid: 99999,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      error: "Process died",
+      workDir: dir,
+      logFile,
+    });
+
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "fail-no-cp" });
+    assert.ok(getText(result).includes("No checkpoint found"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task enforces concurrent limit", async () => {
+  const { dir, store, findTool } = makeTestEnv();
+  try {
+    // Add 2 running tasks to hit the limit
+    for (let i = 0; i < 2; i++) {
+      store.save({
+        taskId: `running-${i}`,
+        repo: "/some/repo",
+        task: "running",
+        taskName: "running",
+        branch: "main",
+        budget: 5,
+        status: "running",
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        workDir: dir,
+        logFile: join(dir, "task.log"),
+      });
+    }
+
+    // Add a failed task with a checkpoint
+    const logFile = join(dir, "failed.log");
+    writeFileSync(logFile, "Resume with: selfassembler --resume checkpoint_abc12345\n");
+    store.save({
+      taskId: "fail-resume",
+      repo: "/some/repo",
+      task: "do something",
+      taskName: "test-task",
+      branch: "main",
+      budget: 10,
+      status: "failed",
+      pid: 99999,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      workDir: dir,
+      logFile,
+    });
+
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "fail-resume" });
+    assert.ok(getText(result).includes("Concurrent task limit reached"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("resume_task spawns process for valid failed task with checkpoint", async () => {
+  const { dir, store, findTool } = makeTestEnv();
+  try {
+    const workDir = join(dir, "resume-task-work");
+    mkdirSync(workDir, { recursive: true });
+    const logFile = join(workDir, "task.log");
+    writeFileSync(
+      logFile,
+      [
+        "=== Claw2PR Task: resume-valid ===",
+        "Phase failed: test_execution",
+        "Resume with: selfassembler --resume checkpoint_deadbeef",
+      ].join("\n"),
+    );
+
+    store.save({
+      taskId: "resume-valid",
+      repo: "/some/repo",
+      task: "fix the tests",
+      taskName: "fix-tests",
+      branch: "main",
+      budget: 10,
+      status: "failed",
+      pid: 99999,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      error: "Tests still failing",
+      workDir,
+      logFile,
+    });
+
+    const tool = findTool("claw2pr_resume_task");
+    const result = await tool.execute("tc-1", { taskId: "resume-valid", budget: 20 });
+    const text = getText(result);
+
+    assert.ok(text.includes("Claw2PR task resumed"), `Expected resume success, got: ${text}`);
+    assert.ok(text.includes("checkpoint_deadbeef"));
+    assert.ok(text.includes("$20"));
+    assert.equal(result.details.taskId, "resume-valid");
+    assert.equal(result.details.checkpointId, "checkpoint_deadbeef");
+
+    // Verify task status was updated to running
+    const updated = store.get("resume-valid")!;
+    assert.equal(updated.status, "running");
+    assert.equal(updated.budget, 20);
+    assert.equal(updated.error, undefined);
+
+    // Clean up spawned process
+    try { process.kill(-(updated.pid), "SIGTERM"); } catch {}
+    try { process.kill(updated.pid, "SIGTERM"); } catch {}
+  } finally {
+    cleanup(dir);
+  }
+});
+
 // ─── claw2pr_setup_status tests ──────────────────────────────
 
 test("setup_status returns structured output", async () => {

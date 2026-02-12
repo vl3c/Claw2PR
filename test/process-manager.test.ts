@@ -8,6 +8,7 @@ import { once } from "node:events";
 
 import {
   parseCurrentPhase,
+  parseCheckpointId,
   parsePrUrl,
   getTaskLog,
   isProcessAlive,
@@ -53,6 +54,54 @@ test("getTaskLog returns the last N lines", () => {
     writeFileSync(logFile, ["1", "2", "3", "4", "5"].join("\n"));
     assert.equal(getTaskLog(logFile, 2), "4\n5");
   });
+});
+
+test("parseCheckpointId extracts checkpoint from log", () => {
+  withTempDir((dir) => {
+    const logFile = join(dir, "task.log");
+    writeFileSync(
+      logFile,
+      [
+        "Phase failed: test_execution",
+        "Error: Tests still failing after 5 iterations",
+        "Resume with: selfassembler --resume checkpoint_898bf920",
+        "Workflow failed: my-task",
+      ].join("\n"),
+    );
+    assert.equal(parseCheckpointId(logFile), "checkpoint_898bf920");
+  });
+});
+
+test("parseCheckpointId returns the latest checkpoint when log has multiple", () => {
+  withTempDir((dir) => {
+    const logFile = join(dir, "task.log");
+    writeFileSync(
+      logFile,
+      [
+        "Phase failed: test_execution",
+        "Resume with: selfassembler --resume checkpoint_898bf920",
+        "Workflow failed: my-task",
+        "",
+        "=== RESUMING FROM CHECKPOINT ===",
+        "Phase failed: code_review",
+        "Resume with: selfassembler --resume checkpoint_69018d4c",
+        "Workflow failed: my-task",
+      ].join("\n"),
+    );
+    assert.equal(parseCheckpointId(logFile), "checkpoint_69018d4c");
+  });
+});
+
+test("parseCheckpointId returns undefined when no checkpoint in log", () => {
+  withTempDir((dir) => {
+    const logFile = join(dir, "task.log");
+    writeFileSync(logFile, "=== Phase: research ===\nSome output\n");
+    assert.equal(parseCheckpointId(logFile), undefined);
+  });
+});
+
+test("parseCheckpointId returns undefined for missing file", () => {
+  assert.equal(parseCheckpointId("/nonexistent/file.log"), undefined);
 });
 
 test("isProcessAlive reflects process lifecycle", async () => {

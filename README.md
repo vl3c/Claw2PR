@@ -45,6 +45,7 @@ SelfAssembler uses feedback mode by default: Claude Code (primary) does the work
 | `claw2pr_task_status` | Check progress: current phase, elapsed time, log tail, PR URL. |
 | `claw2pr_list_tasks` | List all tasks with summary info. Filter by status. |
 | `claw2pr_cancel_task` | Kill a running task (SIGTERM → SIGKILL). |
+| `claw2pr_resume_task` | Resume a failed/cancelled task from its last SelfAssembler checkpoint. |
 | `claw2pr_setup_status` | Check all dependencies and config. |
 
 ## Supported repos
@@ -56,7 +57,7 @@ SelfAssembler uses feedback mode by default: Claude Code (primary) does the work
 
 ```
 claw2pr/
-├── index.ts                  # Plugin entry — registers 5 tools
+├── index.ts                  # Plugin entry — registers 6 tools
 ├── openclaw.plugin.json      # Plugin manifest with config schema
 ├── package.json
 ├── src/
@@ -65,7 +66,7 @@ claw2pr/
 │   ├── task-store.ts         # Persistent JSON task state, auto-cleanup
 │   └── notifier.ts           # POST to /hooks/agent on completion
 ├── scripts/
-│   └── run-task.sh           # Clone → configure → GritGuard → SelfAssembler
+│   └── run-task.sh           # Clone → configure → GritGuard → SelfAssembler (supports resume via RESUME_CHECKPOINT)
 ├── templates/
 │   └── selfassembler.yaml    # Default SA config (feedback mode, no approvals)
 ├── GritGuard/                # Submodule — bubblewrap sandbox wrapper
@@ -177,6 +178,18 @@ Prerequisites: the OpenClaw service must be running as the `openclaw` user.
 6. Agent wakes up and relays the result (PR URL or error) to Telegram
 7. Workspaces auto-clean after 7 days
 
+### Resuming failed tasks
+
+SelfAssembler saves checkpoints after each phase. When a task fails (e.g., at `test_execution` after exhausting fix iterations), the agent can resume it:
+
+1. Agent calls `claw2pr_resume_task` with the failed task's ID
+2. Plugin extracts the checkpoint ID from the task log (e.g., `checkpoint_898bf920`)
+3. `run-task.sh` is spawned in resume mode (`RESUME_CHECKPOINT` env var):
+   - Skips clone and config (repo and worktree already exist)
+   - Appends to the existing task log
+   - Passes `--resume <checkpoint>` to SelfAssembler through GritGuard
+4. SelfAssembler picks up from the failed phase with a fresh budget
+
 ## Lessons learned
 
 Things that broke during development and the fixes applied. See `CLAUDE.md` for the full annotated list with error messages.
@@ -195,6 +208,7 @@ Things that broke during development and the fixes applied. See `CLAUDE.md` for 
 - **GitHub CLI missing/not authenticated**: Docker image lacks `gh` or auth. SA preflight fails. Fix: install `gh` in image, or skip gh check for local repos.
 - **Git dubious ownership**: Docker runs as root, repo owned by host user. Fix: `git config --global --add safe.directory '*'` in wrapper.
 - **Permission denied on venv writes**: Wrapper tried pip install into read-only mounted venv. Fix: use system pip (`/usr/bin/pip3 --break-system-packages`) for project deps.
+- **Root-owned files block host user**: Docker runs as root, creating `root:root` files in the bind-mounted workspace. Fix: `.sa-wrapper.sh` detects the host UID/GID and runs `chown -R` on EXIT to restore ownership.
 - **Local repo origin inaccessible**: Local origins point to host paths that don't exist in container. Fix: SA preflight now detects and removes unreachable local-path origins automatically. run-task.sh also rewrites origin to a real GitHub remote URL when available as a fallback.
 
 ### OpenClaw integration

@@ -4,9 +4,11 @@ import { execSync } from "node:child_process";
 import { TaskStore, type TaskStatus } from "./task-store.js";
 import {
   spawnTask,
+  spawnResumeTask,
   cancelTask,
   getTaskLog,
   parseCurrentPhase,
+  parseCheckpointId,
   parsePrUrl,
   isProcessAlive,
 } from "./process-manager.js";
@@ -364,6 +366,97 @@ export function createClaw2prTools(
           return ok(`Task ${taskId} cancelled (PID ${task.pid} terminated).`, { taskId, cancelled: true });
         }
         return err(`Failed to cancel task ${taskId}`);
+      },
+    },
+
+    // ─── Resume Task ───────────────────────────────────────────
+    {
+      label: "Resume Claw2PR Task",
+      name: "claw2pr_resume_task",
+      description:
+        "Resume a failed Claw2PR task from its last checkpoint. SelfAssembler saves checkpoints " +
+        "after each completed phase, so a task that failed at e.g. test_execution can be resumed " +
+        "from that phase without redoing research, planning, and implementation. " +
+        "The checkpoint ID is extracted automatically from the task log. " +
+        "Only failed or cancelled tasks can be resumed.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          taskId: {
+            type: "string",
+            description: "The task ID of the failed task to resume",
+          },
+          budget: {
+            type: "number",
+            description: `Additional budget in USD for the resumed task (default: ${defaultBudget})`,
+          },
+        },
+        required: ["taskId"],
+      },
+      execute: async (_toolCallId: string, args: unknown) => {
+        const params = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+        const taskId = typeof params.taskId === "string" ? params.taskId.trim() : "";
+        const budget = typeof params.budget === "number" ? params.budget : defaultBudget;
+
+        if (!taskId) return err("Missing 'taskId'");
+
+        const task = store.get(taskId);
+        if (!task) return err(`Task '${taskId}' not found`);
+        if (task.status === "running") return err(`Task '${taskId}' is still running — cancel it first or wait for it to finish`);
+        if (task.status === "completed") return err(`Task '${taskId}' already completed successfully`);
+
+        // Find checkpoint ID from task log
+        const checkpointId = parseCheckpointId(task.logFile);
+        if (!checkpointId) {
+          return err(
+            `No checkpoint found in task log for '${taskId}'. ` +
+            `The task may not have reached a checkpointable phase. ` +
+            `Consider starting a new task instead.`,
+          );
+        }
+
+        // Check concurrent limit
+        store.cleanup();
+        const running = store.countRunning();
+        if (running >= maxConcurrent) {
+          return err(
+            `Concurrent task limit reached (${running}/${maxConcurrent} running). ` +
+            `Wait for a task to finish or cancel one with claw2pr_cancel_task.`,
+          );
+        }
+
+        try {
+          const record = spawnResumeTask(store, {
+            taskId,
+            checkpointId,
+            budget,
+            scriptPath,
+            gritguardPath,
+            selfassemblerVenv: saVenv,
+            ghToken: config.ghToken,
+            gitUserName: config.gitUserName || "OpenClaw Bot",
+            gitUserEmail: config.gitUserEmail || "bot@openclaw.dev",
+            hookToken,
+            pluginDir,
+            envFile: config.envFile,
+            useSubscriptionAuth: config.useSubscriptionAuth,
+            dockerImage: config.dockerImage,
+          });
+
+          return ok(
+            `Claw2PR task resumed!\n` +
+            `  Task ID: ${record.taskId}\n` +
+            `  Name: ${record.taskName}\n` +
+            `  Checkpoint: ${checkpointId}\n` +
+            `  Budget: $${budget}\n` +
+            `  PID: ${record.pid}\n\n` +
+            `The task is resuming from the failed phase. You'll be notified when it completes.\n` +
+            `Use claw2pr_task_status with taskId "${record.taskId}" to check progress.`,
+            { taskId: record.taskId, pid: record.pid, checkpointId },
+          );
+        } catch (e) {
+          return err(`Failed to resume task: ${e instanceof Error ? e.message : String(e)}`);
+        }
       },
     },
 

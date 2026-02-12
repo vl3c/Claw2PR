@@ -75,6 +75,30 @@ Phases run in order: preflight, setup, research, planning, plan_review, implemen
 
 Default: $15 USD per task. For large repos or complex features, increase to $25-30. For small targeted fixes, $5-10 is sufficient. The pipeline stops if the budget is exhausted mid-phase.
 
+## Resuming Failed Tasks
+
+When a task fails (e.g., at the test_execution phase), it can be resumed from the last checkpoint instead of starting over. SelfAssembler saves checkpoints after each completed phase.
+
+```json
+{ "taskId": "ct-abc123-def456" }
+```
+
+Optionally specify additional budget:
+```json
+{ "taskId": "ct-abc123-def456", "budget": 10 }
+```
+
+The checkpoint ID is extracted automatically from the task log. Resume skips already-completed phases (research, planning, implementation, etc.) and picks up from where it failed.
+
+Use this when:
+- A task failed at test_execution and you want to give it more iterations
+- A task ran out of budget mid-phase
+- A transient error (network, API timeout) caused a failure
+
+Do NOT use when:
+- The task description itself needs to change (start a new task instead)
+- The repository has changed significantly since the original run
+
 ## Listing and Cancelling
 
 List all tasks:
