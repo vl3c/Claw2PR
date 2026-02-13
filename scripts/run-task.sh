@@ -98,6 +98,7 @@ if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
     echo "Skipping steps 1-2 (repo and config already exist from original run)"
     cd "$REPO_DIR"
     export GIT_TERMINAL_PROMPT=0
+    SA_RUN_CONFIG="$REPO_DIR/.selfassembler-run.yaml"
 else
     # ─── Step 1: Clone / copy repository ─────────────────────────
     echo "=== Step 1: Preparing repository ==="
