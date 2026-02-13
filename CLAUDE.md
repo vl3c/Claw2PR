@@ -93,6 +93,22 @@ Two sandbox modes:
 **Root cause**: Local repo clones have origin pointing to a host filesystem path (e.g., `/var/lib/openclaw/code/MatHud`). This path doesn't exist inside the Docker container.
 **Fix**: In run-task.sh, detect Docker mode + local repo and rewrite origin to the real GitHub remote URL: `git remote set-url origin $REMOTE_URL`.
 
+### 12b. SA venv must use wheel install (not editable) for Docker
+**Error**: `ModuleNotFoundError: No module named 'selfassembler'`
+**Root cause**: `pip install -e .` creates a finder that maps imports to the host source path. Inside Docker, this path doesn't exist.
+**Fix**: Build a wheel, then install non-editable:
+```bash
+cd <SA_SOURCE_DIR>
+python3 -m pip wheel --no-deps -w /tmp/sa-wheel .
+sudo -u openclaw <SA_VENV>/bin/pip install --force-reinstall --no-deps /tmp/sa-wheel/selfassembler-*.whl
+```
+**Important**: After any SA code change, rebuild the wheel and reinstall. Editable installs will silently break Docker tasks.
+
+### 12c. Per-repo SelfAssembler config
+**Context**: Repos can have their own `selfassembler.yaml` with override fields (commands, phase settings). `run-task.sh` deep-merges template defaults with repo config.
+**How**: Place `selfassembler.yaml` in the repo root with only the fields you want to override.
+**Example**: MatHud overrides `commands.test` for split server/client test architecture.
+
 ## Lessons Learned — OpenClaw Integration
 
 ### 13. Symlink traversal permissions
