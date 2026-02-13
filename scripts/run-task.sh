@@ -149,13 +149,47 @@ else
 
     echo ""
 
-    # ─── Step 2: Copy SelfAssembler config ─────────────────────
+    # ─── Step 2: Configure SelfAssembler ────────────────────
     echo "=== Step 2: Configuring SelfAssembler ==="
 
-    cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
+    REPO_HAS_SA_CONFIG=false
+    if [[ -f "$REPO_DIR/selfassembler.yaml" ]]; then
+        # Repo ships its own config — deep-merge template (defaults) + repo (overrides)
+        REPO_HAS_SA_CONFIG=true
+        python3 << 'MERGE_EOF'
+import yaml, copy, os
 
-    # Override base_branch in the config (use | delimiter to avoid issues with / in branch names)
-    sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
+def deep_merge(base, override):
+    """Recursively merge override into base. Override wins for leaf values."""
+    result = copy.deepcopy(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = deep_merge(result[key], val)
+        else:
+            result[key] = copy.deepcopy(val)
+    return result
+
+template_path = os.environ["SA_TEMPLATE"]
+repo_path = os.path.join(os.environ["TASK_DIR"], "repo", "selfassembler.yaml")
+
+with open(template_path) as f:
+    template = yaml.safe_load(f) or {}
+with open(repo_path) as f:
+    repo_config = yaml.safe_load(f) or {}
+
+merged = deep_merge(template, repo_config)
+
+with open(repo_path, "w") as f:
+    yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
+MERGE_EOF
+        echo "Merged template with repo-level selfassembler.yaml"
+    else
+        cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
+        echo "No repo config found — using template"
+    fi
+
+    # Override base_branch in the config — handle both quoted and unquoted YAML formats
+    sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|;s|base_branch: main$|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
 
     # For local repos, disable PR creation phases (no GitHub remote to push to)
     if [[ "$REPO_URL" == /* ]]; then
@@ -164,14 +198,23 @@ else
         echo "Disabled pr_creation and pr_self_review for local repo"
     fi
 
-    # Ensure SelfAssembler artifacts are gitignored so preflight passes
-    if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
-        printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
-        git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
-        echo "Added selfassembler artifacts to .gitignore"
+    # Ensure SelfAssembler artifacts are gitignored so preflight passes.
+    # If repo ships its own selfassembler.yaml, only gitignore runtime artifacts.
+    if [[ "$REPO_HAS_SA_CONFIG" == true ]]; then
+        if ! grep -qxF 'logs/' "$REPO_DIR/.gitignore" 2>/dev/null; then
+            printf '\n# SelfAssembler runtime artifacts\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
+            git add .gitignore && git commit -m "chore: gitignore selfassembler runtime artifacts"
+            echo "Added SA runtime artifacts to .gitignore (kept repo selfassembler.yaml)"
+        fi
+    else
+        if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
+            printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
+            git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
+            echo "Added selfassembler artifacts to .gitignore"
+        fi
     fi
 
-    echo "Config copied and patched (base_branch=$BASE_BRANCH)"
+    echo "Config configured (base_branch=$BASE_BRANCH, repo_config=$REPO_HAS_SA_CONFIG)"
     echo ""
 fi
 

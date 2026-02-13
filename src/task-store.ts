@@ -54,7 +54,9 @@ export class TaskStore {
     renameSync(tmp, this.filePath);
   }
 
-  /** Reconcile running tasks — mark failed if PID is dead */
+  /** Reconcile running tasks — mark failed/completed if PID is dead.
+   *  Reads the task's status.json (written by run-task.sh) for the real
+   *  exit status, PR URL, and error message. */
   reconcile(): void {
     const tasks = this.readAll();
     let changed = false;
@@ -63,19 +65,39 @@ export class TaskStore {
         try {
           process.kill(task.pid, 0); // Check if alive
         } catch {
-          task.status = "failed";
-          task.finishedAt = new Date().toISOString();
-          task.error = "Process died (detected on startup reconciliation)";
+          // Process is dead — read status.json for real exit info
+          const statusFile = join(task.workDir, "status.json");
+          let realStatus: TaskStatus = "failed";
+          let message = "Process exited (no status file found)";
+          let prUrl: string | undefined;
+          let finishedAt: string | undefined;
+
+          if (existsSync(statusFile)) {
+            try {
+              const raw = JSON.parse(readFileSync(statusFile, "utf-8"));
+              realStatus = raw.status === "completed" ? "completed" : "failed";
+              message = raw.message || message;
+              prUrl = raw.prUrl || undefined;
+              finishedAt = raw.finishedAt || undefined;
+            } catch { /* ignore parse errors, use defaults */ }
+          }
+
+          task.status = realStatus;
+          task.finishedAt = finishedAt || new Date().toISOString();
+          task.error = realStatus === "failed" ? message : undefined;
+          if (prUrl) task.prUrl = prUrl;
           changed = true;
-          console.log(`[claw2pr] Task ${id} marked failed: PID ${task.pid} not found`);
+          console.log(`[claw2pr] Task ${id} reconciled: PID ${task.pid} dead → ${realStatus}`);
         }
       }
     }
     if (changed) this.writeAll(tasks);
   }
 
-  /** Clean up completed/failed tasks older than CLEANUP_DAYS */
+  /** Clean up completed/failed tasks older than CLEANUP_DAYS.
+   *  Also reconciles stale "running" tasks whose PIDs are dead. */
   cleanup(): void {
+    this.reconcile();
     const tasks = this.readAll();
     const cutoff = Date.now() - CLEANUP_DAYS * 24 * 60 * 60 * 1000;
     let changed = false;
