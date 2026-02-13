@@ -152,10 +152,12 @@ else
     # ─── Step 2: Configure SelfAssembler ────────────────────
     echo "=== Step 2: Configuring SelfAssembler ==="
 
-    REPO_HAS_SA_CONFIG=false
+    # Merged config is always written to a separate file so tracked files stay clean.
+    # SA is invoked with --config pointing to this file.
+    SA_RUN_CONFIG="$REPO_DIR/.selfassembler-run.yaml"
+
     if [[ -f "$REPO_DIR/selfassembler.yaml" ]]; then
         # Repo ships its own config — deep-merge template (defaults) + repo (overrides)
-        REPO_HAS_SA_CONFIG=true
         python3 << 'MERGE_EOF'
 import yaml, copy, os
 
@@ -171,6 +173,7 @@ def deep_merge(base, override):
 
 template_path = os.environ["SA_TEMPLATE"]
 repo_path = os.path.join(os.environ["TASK_DIR"], "repo", "selfassembler.yaml")
+out_path = os.path.join(os.environ["TASK_DIR"], "repo", ".selfassembler-run.yaml")
 
 with open(template_path) as f:
     template = yaml.safe_load(f) or {}
@@ -179,42 +182,34 @@ with open(repo_path) as f:
 
 merged = deep_merge(template, repo_config)
 
-with open(repo_path, "w") as f:
+with open(out_path, "w") as f:
     yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
 MERGE_EOF
-        echo "Merged template with repo-level selfassembler.yaml"
+        echo "Merged template with repo-level selfassembler.yaml → .selfassembler-run.yaml"
     else
-        cp "$SA_TEMPLATE" "$REPO_DIR/selfassembler.yaml"
-        echo "No repo config found — using template"
+        cp "$SA_TEMPLATE" "$SA_RUN_CONFIG"
+        echo "No repo config found — using template → .selfassembler-run.yaml"
     fi
 
     # Override base_branch in the config — handle both quoted and unquoted YAML formats
-    sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|;s|base_branch: main$|base_branch: \"$BASE_BRANCH\"|" "$REPO_DIR/selfassembler.yaml"
+    sed -i "s|base_branch: \"main\"|base_branch: \"$BASE_BRANCH\"|;s|base_branch: main$|base_branch: \"$BASE_BRANCH\"|" "$SA_RUN_CONFIG"
 
     # For local repos, disable PR creation phases (no GitHub remote to push to)
     if [[ "$REPO_URL" == /* ]]; then
-        sed -i '/^  pr_creation:/,/^  [a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
-        sed -i '/^  pr_self_review:/,/^[a-z]/{s/enabled: true/enabled: false/}' "$REPO_DIR/selfassembler.yaml"
+        sed -i '/^  pr_creation:/,/^  [a-z]/{s/enabled: true/enabled: false/}' "$SA_RUN_CONFIG"
+        sed -i '/^  pr_self_review:/,/^[a-z]/{s/enabled: true/enabled: false/}' "$SA_RUN_CONFIG"
         echo "Disabled pr_creation and pr_self_review for local repo"
     fi
 
-    # Ensure SelfAssembler artifacts are gitignored so preflight passes.
-    # If repo ships its own selfassembler.yaml, only gitignore runtime artifacts.
-    if [[ "$REPO_HAS_SA_CONFIG" == true ]]; then
-        if ! grep -qxF 'logs/' "$REPO_DIR/.gitignore" 2>/dev/null; then
-            printf '\n# SelfAssembler runtime artifacts\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
-            git add .gitignore && git commit -m "chore: gitignore selfassembler runtime artifacts"
-            echo "Added SA runtime artifacts to .gitignore (kept repo selfassembler.yaml)"
-        fi
-    else
-        if ! grep -qxF 'selfassembler.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
-            printf '\n# SelfAssembler artifacts\nselfassembler.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/\n' >> "$REPO_DIR/.gitignore"
-            git add .gitignore && git commit -m "chore: gitignore selfassembler artifacts"
-            echo "Added selfassembler artifacts to .gitignore"
-        fi
+    # Ensure SelfAssembler runtime artifacts are gitignored so preflight passes.
+    SA_GITIGNORE_ENTRIES='.selfassembler-run.yaml\nlogs/\nplans/\n.worktrees/\n.sa-wrapper.sh\n*.egg-info/'
+    if ! grep -qxF '.selfassembler-run.yaml' "$REPO_DIR/.gitignore" 2>/dev/null; then
+        printf "\n# SelfAssembler runtime artifacts\n$SA_GITIGNORE_ENTRIES\n" >> "$REPO_DIR/.gitignore"
+        git add .gitignore && git commit -m "chore: gitignore selfassembler runtime artifacts"
+        echo "Added SA runtime artifacts to .gitignore"
     fi
 
-    echo "Config configured (base_branch=$BASE_BRANCH, repo_config=$REPO_HAS_SA_CONFIG)"
+    echo "Config configured (base_branch=$BASE_BRANCH, config=$SA_RUN_CONFIG)"
     echo ""
 fi
 
@@ -307,6 +302,7 @@ WRAPPER_EOF
             "$GIT_AUTHOR_NAME" \
             "$GIT_AUTHOR_EMAIL" \
             --resume "$RESUME_CHECKPOINT" \
+            --config "$SA_RUN_CONFIG" \
             --no-approvals \
             --budget "$BUDGET" \
             ${SKIP_PHASES:+--skip-phases "$SKIP_PHASES"} \
@@ -324,6 +320,7 @@ WRAPPER_EOF
             "$GIT_AUTHOR_EMAIL" \
             "$TASK_DESCRIPTION" \
             --name "$TASK_NAME" \
+            --config "$SA_RUN_CONFIG" \
             --no-approvals \
             --budget "$BUDGET" \
             --repo "$REPO_DIR"
@@ -339,6 +336,7 @@ else
         "$GRITGUARD_PATH" \
             selfassembler \
             --resume "$RESUME_CHECKPOINT" \
+            --config "$SA_RUN_CONFIG" \
             --repo "$REPO_DIR" \
             --no-approvals \
             --budget "$BUDGET" \
@@ -350,6 +348,7 @@ else
         "$GRITGUARD_PATH" \
             selfassembler "$TASK_DESCRIPTION" \
             --name "$TASK_NAME" \
+            --config "$SA_RUN_CONFIG" \
             --repo "$REPO_DIR" \
             --no-approvals \
             --budget "$BUDGET"
