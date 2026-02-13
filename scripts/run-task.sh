@@ -78,9 +78,22 @@ PY
     fi
 }
 
+# Fix Docker file ownership (host-side fallback).
+# In Docker mode the container runs as root, creating root-owned files.
+# gritguard-docker has its own EXIT trap for this, but if it gets killed
+# before the trap fires, this provides a second chance.
+fix_docker_ownership() {
+    if [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]] && [[ -d "$TASK_DIR" ]]; then
+        echo "Fixing Docker file ownership in $TASK_DIR..."
+        docker run --rm -v "$TASK_DIR:/fix" alpine \
+            chown -R "$(id -u):$(id -g)" /fix 2>/dev/null || true
+    fi
+}
+
 # Cleanup on failure
 on_error() {
     local exit_code=$?
+    fix_docker_ownership
     echo ""
     echo "=== TASK FAILED (exit code: $exit_code) ==="
     echo "Failed at: $(date -Iseconds)"

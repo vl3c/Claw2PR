@@ -87,7 +87,11 @@ Two sandbox modes:
 ### 11. Root-owned files after Docker run block host user
 **Error**: `Permission denied: '/.../repo/logs'` when openclaw tries to resume or read task files after a Docker run.
 **Root cause**: Docker runs as root. All files created inside the bind-mounted task directory (logs, plans, worktrees, __pycache__, .git refs) end up owned by `root:root`. The host `openclaw` user can't write to them.
-**Fix**: The `.sa-wrapper.sh` script (generated in run-task.sh) detects the host user's UID/GID from the task directory at startup, then sets an EXIT trap that runs `chown -R` to restore ownership before the container exits. This covers both success and failure paths.
+**Fix (3 layers of defense)**:
+1. **In-container trap** (`.sa-wrapper.sh`): EXIT trap runs `chown -R` before the container exits. First line of defense but unreliable if the container is killed (SIGKILL).
+2. **Host-side gritguard-docker trap**: After `docker run` returns, gritguard-docker's EXIT trap runs a disposable Alpine container to `chown -R` the task dir and shared paths (~/.claude, ~/.codex, ~/.local/state). Catches cases where the in-container trap failed.
+3. **Host-side run-task.sh fallback**: The `on_error` handler in run-task.sh runs a Docker chown as a last resort if gritguard-docker was killed before its trap fired.
+4. **Cleanup tool fallback**: `claw2pr_cleanup_task` and TTL-based auto-cleanup use `docker run alpine rm -rf` to remove root-owned files at cleanup time.
 
 ### 12. Local repo origin inaccessible from Docker container
 **Root cause**: Local repo clones have origin pointing to a host filesystem path (e.g., `/var/lib/openclaw/code/MatHud`). This path doesn't exist inside the Docker container.
