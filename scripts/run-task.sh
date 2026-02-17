@@ -325,14 +325,16 @@ if [ -f pyproject.toml ]; then
     /usr/bin/pip3 install --break-system-packages -q -e . 2>/dev/null || true
 fi
 # Claude Code blocks --dangerously-skip-permissions when running as root.
-# Docker writable mode runs as root, so disable dangerous_mode in SA config.
-# SA will use per-phase permission modes instead (plan, acceptEdits, etc).
+# Docker writable mode runs as root, so disable dangerous_mode in SA config
+# and force all phases to use acceptEdits (full permissions — the Docker
+# container itself is the sandbox, no need for Claude's permission restrictions).
 if [ "$(id -u)" = "0" ]; then
-    echo "[wrapper] Running as root — disabling dangerous_mode in SA config"
+    echo "[wrapper] Running as root — disabling dangerous_mode, setting SA_PERMISSION_MODE=acceptEdits"
     SA_CFG="$REPO_PATH/.selfassembler-run.yaml"
     if [ -f "$SA_CFG" ]; then
         sed -i 's/dangerous_mode: true/dangerous_mode: false/' "$SA_CFG"
     fi
+    export SA_PERMISSION_MODE=acceptEdits
 fi
 selfassembler "$@" --repo "$REPO_PATH"
 WRAPPER_EOF
