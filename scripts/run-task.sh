@@ -292,6 +292,15 @@ export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 # Set HOME to match host user so Claude/Codex find their credentials
 export HOME="/var/lib/openclaw"
+# Update Claude Code and Codex to latest versions, then re-patch the
+# bundled ripgrep binary (npm update restores the jemalloc build that
+# crashes on aarch64 with 64KB page sizes).
+echo "[wrapper] Updating Claude Code and Codex CLI..."
+npm update -g @anthropic-ai/claude-code @openai/codex 2>&1 | tail -5
+find /usr/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep \
+    -name rg -type f 2>/dev/null \
+| while read -r vendor_rg; do cp /usr/bin/rg "$vendor_rg"; done
+echo "[wrapper] CLI versions: claude=$(claude --version 2>&1 | head -1), codex=$(codex --version 2>&1 | head -1)"
 # Docker runs as root — restore file ownership to the host user on exit.
 # Detect the original owner from the repo dir (created by host user before Docker).
 TASK_BASE="$(dirname "$REPO_PATH")"
