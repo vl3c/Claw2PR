@@ -324,49 +324,17 @@ if [ -f pyproject.toml ]; then
     /usr/bin/pip3 install --break-system-packages -q -e ".[dev]" 2>/dev/null || \
     /usr/bin/pip3 install --break-system-packages -q -e . 2>/dev/null || true
 fi
-# Claude Code refuses --dangerously-skip-permissions when running as root.
-# Drop to non-root user for selfassembler (which spawns claude/codex CLIs).
-# Grant the sandbox user (uid 1000) access to all needed directories first.
-SANDBOX_USER="sandbox"
-SANDBOX_HOME="/home/$SANDBOX_USER"
-if id "$SANDBOX_USER" &>/dev/null; then
-    # Make workspace, credentials, and state dirs accessible
-    chown -R "$SANDBOX_USER" "$TASK_BASE" 2>/dev/null || true
-    chown -R "$SANDBOX_USER" "$HOME/.claude" 2>/dev/null || true
-    chown -R "$SANDBOX_USER" "$HOME/.codex" 2>/dev/null || true
-    mkdir -p "$HOME/.local/state"
-    chown -R "$SANDBOX_USER" "$HOME/.local" 2>/dev/null || true
-    # Copy git config so sandbox user has safe.directory entries
-    cp /root/.gitconfig "$SANDBOX_HOME/.gitconfig" 2>/dev/null || true
-    chown "$SANDBOX_USER" "$SANDBOX_HOME/.gitconfig" 2>/dev/null || true
-    su -s /bin/bash "$SANDBOX_USER" -c "git config --global --add safe.directory '*'"
-    # Write a runner script to avoid shell escaping issues with su -c
-    SA_RUNNER="$TASK_BASE/.sa-run.sh"
-    {
-        echo "#!/bin/bash"
-        echo "export PATH='$PATH'"
-        echo "export HOME='$HOME'"
-        echo "export GH_TOKEN='$GH_TOKEN'"
-        echo "export GIT_AUTHOR_NAME='$GIT_AUTHOR_NAME'"
-        echo "export GIT_AUTHOR_EMAIL='$GIT_AUTHOR_EMAIL'"
-        echo "export GIT_COMMITTER_NAME='$GIT_COMMITTER_NAME'"
-        echo "export GIT_COMMITTER_EMAIL='$GIT_COMMITTER_EMAIL'"
-        echo "cd '$REPO_PATH'"
-        # Write the selfassembler command with properly escaped args
-        printf 'exec selfassembler'
-        for arg in "$@"; do
-            printf " '%s'" "${arg//\'/\'\\\'\'}"
-        done
-        printf " --repo '%s'\n" "$REPO_PATH"
-    } > "$SA_RUNNER"
-    chmod +x "$SA_RUNNER"
-    chown "$SANDBOX_USER" "$SA_RUNNER"
-    echo "[wrapper] Dropping to user: $SANDBOX_USER"
-    exec su -s /bin/bash "$SANDBOX_USER" "$SA_RUNNER"
-else
-    echo "[wrapper] WARNING: sandbox user not found, running as root"
-    selfassembler "$@" --repo "$REPO_PATH"
+# Claude Code blocks --dangerously-skip-permissions when running as root.
+# Docker writable mode runs as root, so disable dangerous_mode in SA config.
+# SA will use per-phase permission modes instead (plan, acceptEdits, etc).
+if [ "$(id -u)" = "0" ]; then
+    echo "[wrapper] Running as root — disabling dangerous_mode in SA config"
+    SA_CFG="$REPO_PATH/.selfassembler-run.yaml"
+    if [ -f "$SA_CFG" ]; then
+        sed -i 's/dangerous_mode: true/dangerous_mode: false/' "$SA_CFG"
+    fi
 fi
+selfassembler "$@" --repo "$REPO_PATH"
 WRAPPER_EOF
     chmod +x "$WRAPPER"
 
