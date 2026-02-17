@@ -314,6 +314,18 @@ export function createClaw2prTools(
           lines.push(`Error: ${current.error}`);
         }
 
+        // On failure, extract error-relevant lines from log for quick diagnosis
+        if (current.status === "failed" || progress?.failedPhase) {
+          const fullLog = getTaskLog(current.logFile, 200);
+          const errorLines = fullLog.split("\n").filter(
+            (l: string) => /error|failed|abort|core dump|signal|killed|oom/i.test(l) && l.trim().length > 0
+          ).slice(-5);
+          if (errorLines.length > 0) {
+            lines.push("", "─── Error context ───");
+            lines.push(...errorLines);
+          }
+        }
+
         // Checkpoint (for resume)
         if (current.status === "failed") {
           const checkpointId = parseCheckpointId(current.logFile);

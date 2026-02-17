@@ -84,6 +84,14 @@ export function spawnTask(
     delete env.OPENAI_API_KEY;
   }
 
+  // Log key config for debugging (sanitized — no tokens)
+  console.log(
+    `[claw2pr] Task ${opts.taskId} config: ` +
+    `repo=${opts.repo}, name=${opts.taskName}, ` +
+    `budget=${opts.budget}, docker=${opts.dockerImage || "(none)"}, ` +
+    `subAuth=${opts.useSubscriptionAuth || false}`
+  );
+
   const child = spawn("bash", [opts.scriptPath], {
     env,
     detached: true,
@@ -257,6 +265,16 @@ export function parseWorkflowProgress(workDir: string, taskLogFile: string): Wor
     const errors = [...content.matchAll(/phase_failed[\s\S]*?error: (.+?)(?:\n\n|$)/g)];
     if (errors.length > 0) {
       result.lastError = errors[errors.length - 1][1].slice(0, 200);
+    }
+
+    // When lastError is vague, try to extract richer context from nearby output
+    if (result.lastError && (result.lastError.includes("Unknown error") || result.lastError.includes("No error message") || result.lastError.length < 20)) {
+      const outputMatch = content.match(
+        /phase_failed[\s\S]*?artifacts:\s*\{([\s\S]*?)\}/
+      );
+      if (outputMatch) {
+        result.lastError += ` | artifacts: ${outputMatch[1].trim().slice(0, 200)}`;
+      }
     }
   } catch { /* ignore */ }
 

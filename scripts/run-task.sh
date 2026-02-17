@@ -32,6 +32,12 @@ echo "Name:   $TASK_NAME"
 echo "Branch: $BASE_BRANCH"
 echo "Budget: \$$BUDGET"
 echo "Started: $(date -Iseconds)"
+if [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
+    echo "Sandbox: Docker (image=$GRITGUARD_DOCKER_IMAGE)"
+else
+    echo "Sandbox: srt/bwrap"
+fi
+echo "GritGuard: $GRITGUARD_PATH"
 echo ""
 
 REPO_DIR="$TASK_DIR/repo"
@@ -97,6 +103,17 @@ on_error() {
     echo ""
     echo "=== TASK FAILED (exit code: $exit_code) ==="
     echo "Failed at: $(date -Iseconds)"
+
+    # Try to extract error details from SA workflow log
+    local wf_log
+    wf_log=$(ls -t "$REPO_DIR/logs/workflow-"*.log 2>/dev/null | head -1)
+    if [[ -n "$wf_log" ]]; then
+        echo ""
+        echo "--- SA workflow log (last 20 lines) ---"
+        tail -20 "$wf_log"
+        echo "--- end workflow log ---"
+    fi
+
     write_status "failed" "Task failed with exit code $exit_code"
     notify "Claw2PR task '$TASK_NAME' FAILED (task $TASK_ID). Check logs for details."
     exit $exit_code
@@ -275,6 +292,15 @@ export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 # Set HOME to match host user so Claude/Codex find their credentials
 export HOME="/var/lib/openclaw"
+# Update Claude Code and Codex to latest versions, then re-patch the
+# bundled ripgrep binary (npm update restores the jemalloc build that
+# crashes on aarch64 with 64KB page sizes).
+echo "[wrapper] Updating Claude Code and Codex CLI..."
+npm update -g @anthropic-ai/claude-code @openai/codex 2>&1 | tail -5
+find /usr/lib/node_modules/@anthropic-ai/claude-code/vendor/ripgrep \
+    -name rg -type f 2>/dev/null \
+| while read -r vendor_rg; do cp /usr/bin/rg "$vendor_rg"; done
+echo "[wrapper] CLI versions: claude=$(claude --version 2>&1 | head -1), codex=$(codex --version 2>&1 | head -1)"
 # Docker runs as root — restore file ownership to the host user on exit.
 # Detect the original owner from the repo dir (created by host user before Docker).
 TASK_BASE="$(dirname "$REPO_PATH")"
@@ -297,6 +323,18 @@ fi
 if [ -f pyproject.toml ]; then
     /usr/bin/pip3 install --break-system-packages -q -e ".[dev]" 2>/dev/null || \
     /usr/bin/pip3 install --break-system-packages -q -e . 2>/dev/null || true
+fi
+# Claude Code blocks --dangerously-skip-permissions when running as root.
+# Docker writable mode runs as root, so disable dangerous_mode in SA config
+# and force all phases to use acceptEdits (full permissions — the Docker
+# container itself is the sandbox, no need for Claude's permission restrictions).
+if [ "$(id -u)" = "0" ]; then
+    echo "[wrapper] Running as root — disabling dangerous_mode, setting SA_PERMISSION_MODE=acceptEdits"
+    SA_CFG="$REPO_PATH/.selfassembler-run.yaml"
+    if [ -f "$SA_CFG" ]; then
+        sed -i 's/dangerous_mode: true/dangerous_mode: false/' "$SA_CFG"
+    fi
+    export SA_PERMISSION_MODE=acceptEdits
 fi
 selfassembler "$@" --repo "$REPO_PATH"
 WRAPPER_EOF
