@@ -32,6 +32,12 @@ echo "Name:   $TASK_NAME"
 echo "Branch: $BASE_BRANCH"
 echo "Budget: \$$BUDGET"
 echo "Started: $(date -Iseconds)"
+if [[ -n "${GRITGUARD_DOCKER_IMAGE:-}" ]]; then
+    echo "Sandbox: Docker (image=$GRITGUARD_DOCKER_IMAGE)"
+else
+    echo "Sandbox: srt/bwrap"
+fi
+echo "GritGuard: $GRITGUARD_PATH"
 echo ""
 
 REPO_DIR="$TASK_DIR/repo"
@@ -97,6 +103,17 @@ on_error() {
     echo ""
     echo "=== TASK FAILED (exit code: $exit_code) ==="
     echo "Failed at: $(date -Iseconds)"
+
+    # Try to extract error details from SA workflow log
+    local wf_log
+    wf_log=$(ls -t "$REPO_DIR/logs/workflow-"*.log 2>/dev/null | head -1)
+    if [[ -n "$wf_log" ]]; then
+        echo ""
+        echo "--- SA workflow log (last 20 lines) ---"
+        tail -20 "$wf_log"
+        echo "--- end workflow log ---"
+    fi
+
     write_status "failed" "Task failed with exit code $exit_code"
     notify "Claw2PR task '$TASK_NAME' FAILED (task $TASK_ID). Check logs for details."
     exit $exit_code
